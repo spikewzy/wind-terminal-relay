@@ -23,7 +23,7 @@ relay 是访问通道，native 数据来源仍为 `wind_terminal_api`；上游 `
 
 ## 用量监控口径
 
-监控采用滚动 UTC 时间窗口。普通客户端只查看自己的聚合，管理员凭据只读取全体聚合与各客户端用量，不借此读取别人的查询参数、原始值或回执。
+监控默认采用滚动 UTC 7×24 小时时间窗口。任务统计按入队时间划定群体；新增调用预留观测独立按每次预留的执行端观测时间筛选，避免排队造成时间归属错误。普通客户端只查看自己的聚合，管理员凭据只读取全体聚合与各客户端用量，不借此读取别人的查询参数、原始值或回执。
 
 以下数字必须分开：
 
@@ -44,7 +44,7 @@ Wind 官方剩余额度、账号外的人工操作/其他软件用量、SDK 实�
 
 ## Mac / Windows
 
-两个平台使用同一套 Python 客户端和 MCP 协议。平台差异集中在 Python 可执行路径、路径转义以及私有文件权限：Mac/Linux 的虚拟环境路径是 `.venv/bin/python`，Windows 是 `.venv\\Scripts\\python.exe`。使用配置生成器输出 Codex TOML 或 WorkBuddy JSON，然后只合并 `wind_terminal_relay` 条目。
+两个平台使用同一套 Python 客户端和 MCP 协议。平台差异集中在 Python 可执行路径、路径转义以及私有文件权限：Mac/Linux 的虚拟环境路径是 `.venv/bin/python`，Windows 是 `.venv\Scripts\python.exe`。使用配置生成器输出 Codex TOML 或 WorkBuddy JSON，然后只合并 `wind_terminal_relay` 条目。
 
 这是 stdio 本地代理模式：由 Codex/WorkBuddy 启动客户端子进程，子进程再访问远程 HTTPS 网关。云端网关的 URL 不能直接作为 stdio 命令使用，也不能假设 `/v1/jobs` 是标准远程 MCP URL。
 

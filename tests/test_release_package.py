@@ -81,6 +81,25 @@ class ReleasePackageTests(unittest.TestCase):
             build(self.root)
         self.assertEqual(list(outside.iterdir()), [])
 
+    @unittest.skipIf(sys.platform == "win32", "Creating Windows symlinks can require elevated permissions")
+    def test_output_archive_or_checksum_symlink_does_not_overwrite_external_file(self):
+        from wind_relay import VERSION
+        destination = self.root / "dist"
+        destination.mkdir()
+        outside = Path(self.temporary.name) / "preserve.txt"
+        outside.write_text("preserve this file")
+        for suffix in (".zip", ".zip.sha256"):
+            with self.subTest(suffix=suffix):
+                target = destination / ("wind-terminal-relay-" + VERSION + suffix)
+                target.symlink_to(outside)
+                try:
+                    with self.assertRaisesRegex(ValueError, "unsafe symlink"):
+                        build(self.root)
+                    self.assertEqual(outside.read_text(), "preserve this file")
+                    self.assertEqual(list(destination.iterdir()), [target])
+                finally:
+                    target.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

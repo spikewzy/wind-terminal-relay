@@ -27,8 +27,8 @@ def build_server(proxy):
                           "required": ["job_id"], "additionalProperties": False}),
         Tool(name="relay_status", description="Inspect relay worker mode, connectivity and your own pending count; does not log into Wind.",
              inputSchema={"type": "object", "properties": {}, "additionalProperties": False}),
-        Tool(name="relay_usage", description="Read only your own relay job and conservative preflight usage aggregates. Default rolling UTC 24 hours; no Wind query. Official Wind quota and exact SDK-call counts are unavailable.",
-             inputSchema={"type": "object", "properties": {"days": {"type": "integer", "minimum": 1, "maximum": 31, "default": 1}},
+        Tool(name="relay_usage", description="Read your own job statistics and delayed conservative reservation observations. Default rolling UTC 7x24 hours, without midnight reset; no Wind query. Official Wind limit, remaining quota and exact SDK-call counts are unknown.",
+             inputSchema={"type": "object", "properties": {"days": {"type": "integer", "minimum": 1, "maximum": 31, "default": 7}},
                           "additionalProperties": False}),
     ]
 
@@ -46,7 +46,7 @@ def build_server(proxy):
             elif name == "relay_status":
                 result = await proxy.connection.request("GET", "/v1/status")
             elif name == "relay_usage":
-                days = arguments.get("days", 1)
+                days = arguments.get("days", 7)
                 if type(days) is not int or not 1 <= days <= 31:
                     raise RelayError("INVALID_WINDOW", "days must be an integer in 1..31")
                 result = await proxy.connection.request("GET", "/v1/usage?days=" + str(days))

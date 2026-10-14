@@ -205,6 +205,9 @@ class RoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value["window"]["timezone"], "UTC")
         self.assertIsNone(value["wind_account_remaining"])
         self.assertFalse(value["account_quota"])
+        default = await self.a.request("GET", "/v1/usage")
+        self.assertEqual(default["window"]["days"], 7)
+        self.assertEqual(default["reservation_observation_window"]["days"], 7)
 
     async def test_admin_cannot_read_another_clients_job_result(self):
         await self.a.request("POST", "/v1/jobs", {"job_id": "1" * 32, **PAYLOAD})

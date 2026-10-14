@@ -15,7 +15,7 @@ def payload(root=ROOT):
     root = Path(root)
     exact = [
         "README.md", "INSTALL.md", "LICENSE", "build_release.py",
-        ".gitignore", ".github/workflows/checks.yml",
+        ".gitignore", ".gitattributes", ".github/workflows/checks.yml",
         "requirements.in", "requirements-gateway.in", "requirements.lock.txt",
         "requirements-gateway.lock.txt", "references/relay-tool-contract.json",
         "relay_client.py", "relay_gateway.py", "relay_worker.py", "relay_setup.py",
@@ -54,6 +54,9 @@ def build(root=ROOT):
         raise ValueError("Refusing unsafe symlink output directory: dist")
     destination.mkdir(exist_ok=True)
     archive = destination / f"wind-terminal-relay-{VERSION}.zip"
+    checksum = archive.with_suffix(".zip.sha256")
+    if archive.is_symlink() or checksum.is_symlink():
+        raise ValueError("Refusing unsafe symlink output file")
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
         for file in payload(root):
             relative = file.relative_to(root).as_posix()
@@ -62,7 +65,7 @@ def build(root=ROOT):
             output.writestr(relative, value)
         output.writestr("relay-release-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
-    archive.with_suffix(".zip.sha256").write_text(f"{sha256}  {archive.name}\n", encoding="utf-8")
+    checksum.write_text(f"{sha256}  {archive.name}\n", encoding="utf-8")
     return {"archive": str(archive), "sha256": sha256, "files": len(manifest["files"])}
 
 

@@ -122,13 +122,13 @@ Windows 将 Python 命令换为 `& ".\.venv\Scripts\python.exe"`。网关默认�
   --client-id colleague-windows
 ```
 
-上述凭据变更写入配置后，需在当前任务空闲时重启网关才能生效，不自动中断生产进程。管理员查询滚动 UTC 24 小时统计：
+上述凭据变更写入配置后，需在当前任务空闲时重启网关才能生效，不自动中断生产进程。管理员默认查询滚动 UTC 7×24 小时统计：
 
 ```sh
-.venv/bin/python relay_admin.py --config .relay/admin.json --days 1
+.venv/bin/python relay_admin.py --config .relay/admin.json --days 7
 ```
 
-`--days` 支持 1 到 31 天；结果只包含汇总，不包含 token、其他客户端的查询参数、原始值或回执。旧结果缺少新增计量时保持未知，不补造历史用量。
+`--days` 支持 1 到 31 天；设为 1 可查看最近 24 小时。结果只包含汇总，不包含 token、其他客户端的查询参数、原始值或回执。旧结果缺少新增计量时保持未知，不补造历史用量。调用预留观测按实际观测时刻筛选，不用任务入队时间代替；官方上限与剩余额度未知，详见 [额度规则](docs/QUOTA.md)。
 
 ## 五、独立目录中的实体执行端
 

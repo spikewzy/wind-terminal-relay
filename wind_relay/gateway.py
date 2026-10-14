@@ -80,7 +80,7 @@ def create_app(config, queue=None):
         owner = authenticate(request, role)
         if set(request.query_params) - {"days"}:
             raise RelayError("INVALID_WINDOW", "Only the days query parameter is supported")
-        value = request.query_params.get("days", "1")
+        value = request.query_params.get("days", "7")
         if not re.fullmatch(r"[1-9][0-9]?", value) or int(value) > 31:
             raise RelayError("INVALID_WINDOW", "days must be an integer in 1..31")
 

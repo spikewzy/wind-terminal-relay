@@ -4,10 +4,10 @@
 
 ## 普通设备
 
-通过本机 MCP 的 `relay_usage` 查询自己最近 1 天的统计，可将 `days` 设为 1..31。每个客户端凭据对应一个隔离身份；不能指定别人名字来读取他人的聚合。读取监控直接访问网关，不提交 Wind 数据任务，也不消耗新的原生调用预留。
+通过本机 MCP 的 `relay_usage` 默认查询自己最近 7×24 小时的统计，可将 `days` 设为 1..31，设为 1 则查看最近 24 小时。每个客户端凭据对应一个隔离身份；不能指定别人名字来读取他人的聚合。读取监控直接访问网关，不提交 Wind 数据任务，也不消耗新的原生调用预留。
 
 ```text
-只使用 wind_terminal_relay，调用 relay_usage 查看我最近一天的任务、失败、排队、缓存和调用预留统计。区分 mock 与 native；未知值不要当成零，不要为检查用量另行取数。
+只使用 wind_terminal_relay，调用 relay_usage 查看我最近七天的任务、失败、排队、缓存和调用预留观测。区分 mock 与 native；未知值不要当成零，不要为检查用量另行取数。
 ```
 
 ## 管理员
@@ -16,12 +16,16 @@
 
 ```sh
 python relay_setup.py issue-admin --gateway .relay/gateway.json --url https://relay.example.com --output .relay/admin.json
-python relay_admin.py --config .relay/admin.json --days 1
+python relay_admin.py --config .relay/admin.json --days 7
 ```
 
-`relay.example.com` 是占位地址。添加管理员后需重载网关配置再查报告。使用本机虚拟环境的 Python；Windows 使用 `.venv\\Scripts\\python.exe`，Mac/Linux 使用 `.venv/bin/python`。
+`relay.example.com` 是占位地址。添加管理员后需重载网关配置再查报告。使用本机虚拟环境的 Python；Windows 使用 `.venv\Scripts\python.exe`，Mac/Linux 使用 `.venv/bin/python`。
 
 报告显示各设备和总计：窗口内接收任务、成功、失败、结果状态未知、排队与执行状态；另显示所有年龄任务的当前待处理数；native/mock 的计量分别列出，缺失计量的任务数量同时显示。时间窗为最近 days × 24 小时，UTC 表达，按入队时间划定统计群体，不是自然日账单。平均等待时间为入队到领取，执行阶段时间为领取到网关接收结果，不是纯 SDK 耗时。
+
+另外的调用预留观测窗口按每次预留的执行端时间筛选，独立于上述任务入队群体。任务先排队再取数时，这两个窗口可能不同；默认观察最近 168 小时，不会在午夜或固定星期几清零。观测依赖执行端时间，只有结果回传之后云端才能看到这些事件。未回传及缺少逐次计量的旧任务保持未知，不能当成零；这仍不是整个 Wind 账户的完整扣量账单。
+
+额度超限观察只记录本次失败任务中的 quota 错误，不把成功能力检查或回执中携带的历史错误重复记为新失败。最近失败时间不代表当前仍受限，也不能据它计算恢复时间。刷新规则与边界见 [QUOTA.md](QUOTA.md)。
 
 ## 增加和撤销设备
 
