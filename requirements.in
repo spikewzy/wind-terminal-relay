@@ -1,0 +1,4 @@
+# Local stdio client and native worker adapter. The worker reuses its core venv.
+mcp==1.26.0
+httpx==0.28.1
+

@@ -1,0 +1,7 @@
+{
+  "url": "https://relay.example.com",
+  "token": "REPLACE_WITH_YOUR_PRIVATE_CLIENT_TOKEN",
+  "wait_seconds": 2,
+  "allow_private_http": false
+}
+

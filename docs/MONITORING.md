@@ -1,0 +1,50 @@
+# 用量监控与设备管理
+
+这些入口属于独立 relay 0.1.0。迁移网关和执行端之后，新增的观测才会开始生效；当前已部署的旧试验版本不会因下载本项目自动获得新功能。
+
+## 普通设备
+
+通过本机 MCP 的 `relay_usage` 查询自己最近 1 天的统计，可将 `days` 设为 1..31。每个客户端凭据对应一个隔离身份；不能指定别人名字来读取他人的聚合。读取监控直接访问网关，不提交 Wind 数据任务，也不消耗新的原生调用预留。
+
+```text
+只使用 wind_terminal_relay，调用 relay_usage 查看我最近一天的任务、失败、排队、缓存和调用预留统计。区分 mock 与 native；未知值不要当成零，不要为检查用量另行取数。
+```
+
+## 管理员
+
+首次部署会生成独立 `admin.json`，只能查看聚合报告，不读取其他客户端任务、参数或原始数据。旧网关用 `issue-admin` 添加此角色；保留旧网关、客户端和执行端凭据。以下命令都在已有配置的受控电脑操作，生成器不会打印凭据。
+
+```sh
+python relay_setup.py issue-admin --gateway .relay/gateway.json --url https://relay.example.com --output .relay/admin.json
+python relay_admin.py --config .relay/admin.json --days 1
+```
+
+`relay.example.com` 是占位地址。添加管理员后需重载网关配置再查报告。使用本机虚拟环境的 Python；Windows 使用 `.venv\\Scripts\\python.exe`，Mac/Linux 使用 `.venv/bin/python`。
+
+报告显示各设备和总计：窗口内接收任务、成功、失败、结果状态未知、排队与执行状态；另显示所有年龄任务的当前待处理数；native/mock 的计量分别列出，缺失计量的任务数量同时显示。时间窗为最近 days × 24 小时，UTC 表达，按入队时间划定统计群体，不是自然日账单。平均等待时间为入队到领取，执行阶段时间为领取到网关接收结果，不是纯 SDK 耗时。
+
+## 增加和撤销设备
+
+新增一台设备：
+
+```sh
+python relay_setup.py add-client --gateway .relay/gateway.json --client-id colleague2-win --url https://relay.example.com --output .relay/client-colleague2-win.json
+```
+
+撤销该设备：
+
+```sh
+python relay_setup.py revoke-client --gateway .relay/gateway.json --client-id colleague2-win
+```
+
+两者在网关重载配置后生效。管理命令有跨平台独占锁，防止两个管理员同时覆盖配置；不要绕过工具并发手工改写。旧身份保留历史任务归属，撤销后的 client_id 不能重新分配；换人或新设备使用新名字。撤销凭据不会删除旧回执，不会终止或重做已开始任务，也不会自动取消已排队任务。
+
+## 限制与告警
+
+网关 `queue_policy` 可以覆盖默认入队限制。默认每设备 5 个待处理任务、每设备每分钟 30 个新任务、全局最多 100 个排队任务，全局每分钟接收上限默认未配置。
+
+达到入队上限返回确定未接收的拒绝，客户端显示 `accepted=false` 和可安全等待后重试的提示；不会要求轮询一个不存在的任务。提交响应丢失等不明确的网络故障则保留原 job_id，只核查原任务，不生成新任务重复取数。
+
+本版本提供按需汇总，不创建定时通知或宣称已完成报警系统。可据当前待处理、不确定任务、失败、等待时间和配置预算的观测后续设置阈值；Wind 官方剩余额度、HTTP请求总数和精确 SDK 实际调用数仍为未知。各客户端分组不能覆盖普通本地 MCP、人工终端或其他程序的用量。
+
+计量账本不随 24 小时原始结果清理而删除，只保留身份、任务归属、状态、时间和数字汇总。长时间使用后应另外制定账本保留及备份策略；本版本未自动压缩或删除历史计量。

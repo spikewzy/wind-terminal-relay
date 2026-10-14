@@ -1,0 +1,9 @@
+{
+  "url": "https://relay.example.com",
+  "token": "REPLACE_WITH_THE_PRIVATE_WORKER_TOKEN",
+  "data_directory": "worker-state",
+  "mcp_root": "/absolute/path/to/wind-terminal-mcp",
+  "shared_profile": "/absolute/path/to/wind-terminal-mcp/runtime",
+  "allow_private_http": false
+}
+
