@@ -40,7 +40,31 @@ try {
     if (-not $created.restart_required) { throw 'Missing reload warning.' }
     $downloaded = Invoke-RestMethod 'http://127.0.0.1:8766/api/manage/download/smoke-win' -Headers $headers
     if (-not $downloaded.token) { throw 'Missing synthetic credential download.' }
-    Write-Host 'WINDOWS_CONSOLE_INSTALL_AND_UPGRADE_OK; no real gateway or Wind was used.'
+    # Deliberately broken update payload with a matching manifest exercises
+    # recovery from startup failure, not merely integrity-check rejection.
+    $installedHash = (Get-FileHash (Join-Path $app 'monitor/monitor.py')).Hash
+    $configAfterAdd = (Get-FileHash (Join-Path $app '.relay/gateway.json')).Hash
+    $badScript = Join-Path $packageRoot 'monitor/monitor.py'
+    [IO.File]::WriteAllText($badScript, 'raise RuntimeError("SYNTHETIC_STARTUP_FAILURE")',[Text.Encoding]::ASCII)
+    $manifestPath = Join-Path $packageRoot 'console-manifest.json'
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    $manifest.files.'monitor/monitor.py' = (Get-FileHash $badScript).Hash.ToLowerInvariant()
+    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+    $failedAsExpected = $false
+    try { & $updater -AppDirectory $app -PythonExe $python -NoOpen } catch { $failedAsExpected = $true }
+    if (-not $failedAsExpected) { throw 'Broken update unexpectedly succeeded.' }
+    if ((Get-FileHash (Join-Path $app 'monitor/monitor.py')).Hash -ne $installedHash -or
+        (Get-FileHash (Join-Path $app '.relay/gateway.json')).Hash -ne $configAfterAdd) { throw 'Rollback did not preserve old code and relay credentials.' }
+    $restored = $false
+    for ($attempt=0; $attempt -lt 10; $attempt++) {
+        try {
+            $status = Invoke-RestMethod 'http://127.0.0.1:8766/api/status' -TimeoutSec 2
+            if ($status.diagnostics.version -eq '0.2.0') { $restored = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $restored) { throw 'Old console did not resume after rollback.' }
+    Write-Host 'WINDOWS_CONSOLE_INSTALL_UPGRADE_AND_ROLLBACK_OK; no real gateway or Wind was used.' 
 } finally {
     Stop-ScheduledTask -TaskName 'WindRelayMonitor' -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName 'WindRelayMonitor' -Confirm:$false -ErrorAction SilentlyContinue
