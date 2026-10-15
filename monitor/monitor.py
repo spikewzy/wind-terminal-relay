@@ -10,9 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import sqlite3
 import threading
 import time
@@ -225,6 +227,16 @@ class Monitor:
 
 
 def make_server(monitor, port):
+    class MonitorServer(ThreadingHTTPServer):
+        # Windows SO_REUSEADDR permits two listeners on one port. Use exclusive
+        # ownership there; Unix retains its normal quick-restart behaviour.
+        allow_reuse_address = os.name != "nt"
+
+        def server_bind(self):
+            if os.name == "nt":
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -253,7 +265,7 @@ def make_server(monitor, port):
             self.end_headers()
             self.wfile.write(data)
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return MonitorServer(("127.0.0.1", port), Handler)
 
 
 def main():
