@@ -40,6 +40,8 @@ flowchart LR
 
 ## 安装与来源
 
+云电脑需要可视化状态页时，可单独添加 [云端监控器](monitor/README.md)：查看网关、取数电脑心跳、任务与设备状态，不提交 Wind 取数。兼容旧试验网关，无需为了安装监控器迁移正在运行的中继。
+
 详见 [INSTALL.md](INSTALL.md)、[设计与计量口径](docs/DESIGN.md)、[设备管理及用量监控](docs/MONITORING.md)、[滚动额度规则](docs/QUOTA.md)和[从旧试验版本迁移](docs/MIGRATION.md)。推荐 Python 3.12，当前依赖锁要求 Python 3.11 或更新版本。客户端和网关可安装到完全独立目录；执行端复用原核心环境，但中继源码也可以放在独立目录中。
 
 客户端提供原有 26 个工具，加 `relay_status`、`relay_usage`、`relay_job_status` 和 `relay_cancel_job`，合计 30 个工具。relay 本身版本为 0.1.0，支持的核心版本独立记录在工具契约中，不能用 relay 版本推断 Wind 核心版本。
