@@ -23,3 +23,6 @@ monitor/logs/
 monitor/diagnostics/
 !examples/*.example.json
 
+
+monitor/auth/
+.console-updates/

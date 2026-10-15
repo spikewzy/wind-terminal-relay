@@ -13,7 +13,7 @@ import urllib.request
 import zipfile
 
 from monitor.monitor import Monitor, collect, database_path, make_server, probe, read_snapshot
-from monitor.build_package import build as build_monitor, FILES
+from monitor.build_package import build as build_monitor, FILES, ROOT_FILES
 
 
 class MonitorTests(unittest.TestCase):
@@ -185,7 +185,7 @@ class MonitorHttpTests(unittest.TestCase):
             self.assertEqual(response.headers["Cache-Control"], "no-store")
             self.assertIsNone(response.headers.get("Access-Control-Allow-Origin"))
         with urllib.request.urlopen(self.url) as response:
-            self.assertIn("运行监控", response.read().decode())
+            self.assertIn("Wind 中继管理台", response.read().decode())
         for headers in ({"Host": "hostile.example"}, {"Origin": "https://hostile.example"}):
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(urllib.request.Request(self.url+"/api/status", headers=headers))
@@ -198,7 +198,7 @@ class MonitorHttpTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 404)
         with self.assertRaises(urllib.error.HTTPError) as error:
             urllib.request.urlopen(urllib.request.Request(self.url+"/api/status", data=b"{}"))
-        self.assertEqual(error.exception.code, 501)
+        self.assertEqual(error.exception.code, 403)
         with self.assertRaises(OSError):
             make_server(self.monitor, self.server.server_port)
 
@@ -239,8 +239,8 @@ class MonitorPackageTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), result["sha256"])
             with zipfile.ZipFile(archive) as package:
                 self.assertIsNone(package.testzip())
-                self.assertEqual(set(package.namelist()), {"monitor/"+name for name in FILES} | {"monitor/manifest.json"})
-                manifest = json.loads(package.read("monitor/manifest.json"))
+                self.assertEqual(set(package.namelist()), {"monitor/"+name for name in FILES} | set(ROOT_FILES) | {"console-manifest.json"})
+                manifest = json.loads(package.read("console-manifest.json"))
                 for name, digest in manifest["files"].items():
                     data = package.read(name)
                     self.assertEqual(hashlib.sha256(data).hexdigest(), digest)

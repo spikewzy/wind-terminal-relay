@@ -1,8 +1,4 @@
-"""Loopback-only, read-only monitor, compatible with the original relay gateway.
-
-Standard library only. Never imports the queue, Wind core, SDK or executor.
-No query submission, database migration, retry, recovery or deletion operations.
-"""
+"""Loopback-only relay console. No Wind imports, queries or database writes."""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import hmac
 import os
 from pathlib import Path
 import re
@@ -25,8 +22,10 @@ import urllib.request
 
 try:
     from .diagnostics import VERSION, Recorder, bundle_name
+    from .management import Management, ManagementError, access_key
 except ImportError:  # Running this portable file directly, outside a package.
     from diagnostics import VERSION, Recorder, bundle_name
+    from management import Management, ManagementError, access_key
 
 HERE = Path(__file__).resolve().parent
 IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
@@ -236,7 +235,9 @@ class Monitor:
         self.config, self.client, self.port, self.interval = config, client, port, interval
         self.stop = threading.Event()
         self.lock = threading.Lock()
-        self.value = {"loading": True, "collected_at": time.time()}
+        self.value = {"loading": True, "collected_at": time.time(), "diagnostics": {"version": VERSION}}
+        self.management = None
+        self.console_key = None
         self.recorder = recorder if recorder is not None else Recorder()
 
     def run(self):
@@ -276,35 +277,96 @@ def make_server(monitor, port):
         def log_message(self, *args):
             pass
 
-        def do_GET(self):
+        def allowed_origin(self):
             hosts = {"127.0.0.1:" + str(self.server.server_port), "localhost:" + str(self.server.server_port)}
-            if self.headers.get("Host") not in hosts or (self.headers.get("Origin") and
-                    self.headers["Origin"] not in {"http://" + h for h in hosts}):
-                self.send_error(403)
-                return
-            filename = None
-            if self.path == "/":
-                data, mime = (HERE / "index.html").read_bytes(), "text/html; charset=utf-8"
-            elif self.path == "/api/status":
-                with monitor.lock:
-                    data = json.dumps(monitor.value, ensure_ascii=False, allow_nan=False).encode()
-                mime = "application/json; charset=utf-8"
-            elif self.path == "/api/diagnostics":
-                monitor.recorder.record("diagnostics_exported", "export", "DIAGNOSTICS_EXPORTED")
-                data, mime, filename = monitor.export(), "application/zip", bundle_name()
-            else:
-                self.send_error(404)
-                return
-            self.send_response(200)
+            return (self.headers.get("Host") in hosts and
+                    (not self.headers.get("Origin") or self.headers["Origin"] in {"http://" + h for h in hosts}))
+
+        def authorized(self):
+            supplied = self.headers.get("X-Console-Token", "")
+            return (monitor.management is not None and bool(monitor.console_key) and
+                    re.fullmatch(r"[A-Za-z0-9_-]{43,128}", supplied) is not None and hmac.compare_digest(supplied, monitor.console_key))
+
+        def respond(self, data, mime="application/json; charset=utf-8", status=200, filename=None):
+            if not isinstance(data, bytes):
+                data = json.dumps(data, ensure_ascii=False, allow_nan=False).encode()
+            self.send_response(status)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(data)))
             if filename is not None:
                 self.send_header("Content-Disposition", 'attachment; filename="'+filename+'"')
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
             self.end_headers()
             self.wfile.write(data)
+
+        def management_error(self, exc):
+            if isinstance(exc, ManagementError):
+                self.respond({"error": exc.code}, status=exc.status)
+            else:
+                monitor.recorder.record("management_failed", "management", "MANAGEMENT_FAILED", exc=exc)
+                self.respond({"error": "MANAGEMENT_FAILED"}, status=500)
+
+        def do_GET(self):
+            if not self.allowed_origin():
+                self.respond({"error": "ORIGIN_DENIED"}, status=403)
+                return
+            if self.path == "/":
+                self.respond((HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+            elif self.path == "/api/status":
+                with monitor.lock:
+                    data = dict(monitor.value)
+                self.respond(data)
+            elif self.path == "/api/diagnostics":
+                monitor.recorder.record("diagnostics_exported", "export", "DIAGNOSTICS_EXPORTED")
+                self.respond(monitor.export(), "application/zip", filename=bundle_name())
+            elif self.path == "/api/manage/devices" or self.path.startswith("/api/manage/download/"):
+                if not self.authorized():
+                    self.respond({"error": "CONSOLE_LOCKED"}, status=403)
+                    return
+                try:
+                    if self.path == "/api/manage/devices":
+                        self.respond(monitor.management.listing())
+                    else:
+                        client_id = self.path.removeprefix("/api/manage/download/")
+                        data = monitor.management.download(client_id)
+                        self.respond(data, filename="client-"+client_id+".json")
+                except Exception as exc:
+                    self.management_error(exc)
+            else:
+                self.respond({"error": "NOT_FOUND"}, status=404)
+
+        def do_POST(self):
+            if not self.allowed_origin() or not self.authorized():
+                self.respond({"error": "CONSOLE_LOCKED"}, status=403)
+                return
+            if self.path not in {"/api/manage/add", "/api/manage/revoke", "/api/manage/verify-reload"}:
+                self.respond({"error": "NOT_FOUND"}, status=404)
+                return
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+                self.respond({"error": "JSON_REQUIRED"}, status=415)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 2 <= length <= 4096 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError()
+                self.connection.settimeout(5)
+                body = json.loads(self.rfile.read(length))
+                if not isinstance(body, dict) or set(body) - {"client_id", "confirmation"}:
+                    raise ValueError()
+            except (ValueError, TimeoutError, OSError):
+                self.respond({"error": "INVALID_REQUEST"}, status=400)
+                return
+            try:
+                if self.path.endswith("verify-reload"):
+                    result = monitor.management.verify_reload()
+                else:
+                    result = monitor.management.change(self.path.rsplit("/", 1)[-1], body.get("client_id"), body.get("confirmation"))
+                self.respond(result)
+            except Exception as exc:
+                self.management_error(exc)
 
     return MonitorServer(("127.0.0.1", port), Handler)
 
@@ -317,11 +379,21 @@ def main():
     parser.add_argument("--gateway-port", type=int, default=8765)
     parser.add_argument("--interval", type=int, default=10)
     parser.add_argument("--log-dir", type=Path, default=HERE / "logs")
+    parser.add_argument("--console-key", type=Path, default=HERE / "auth/console.key")
+    parser.add_argument("--open-console", action="store_true", help="Open the authenticated desktop entry; never starts a second server")
     parser.add_argument("--export-diagnostics", action="store_true", help="Export without starting or requiring the monitor server")
     parser.add_argument("--output", type=Path, help="Diagnostic ZIP destination; defaults to monitor/diagnostics/")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535 or not 1 <= args.gateway_port <= 65535 or args.interval < 5:
         parser.error("Use an unprivileged monitor port and interval >= 5 seconds")
+    if args.open_console:
+        try:
+            import webbrowser
+            key = access_key(args.console_key)
+            webbrowser.open("http://127.0.0.1:"+str(args.port)+"/#key="+key)
+        except Exception:
+            parser.exit(1, "Console entry unavailable; run the console updater on this cloud computer.\n")
+        return
     # CLI export must not open a second rotating writer while the service may
     # still be running; it reads prior logs and keeps fresh checks in memory.
     recorder = Recorder(args.log_dir, read_only=args.export_diagnostics)
@@ -345,6 +417,12 @@ def main():
         finally:
             recorder.close()
         return
+    try:
+        monitor.console_key = access_key(args.console_key)
+        monitor.management = Management(args.config, args.client_config,
+            lambda: dict(read_snapshot(database_path(args.config)), database_ok=True), recorder, args.gateway_port)
+    except Exception as exc:
+        recorder.record("management_unavailable", "management", "READ_ONLY_MODE", exc=exc)
     try:
         server = make_server(monitor, args.port)
     except OSError as exc:

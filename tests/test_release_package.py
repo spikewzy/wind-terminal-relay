@@ -31,6 +31,8 @@ class ReleasePackageTests(unittest.TestCase):
             "server.py", "wind_bridge/backend.py", "WindSDK/WindPy.py",
             "client-owner.json", "gateway.json", "queue.sqlite",
             "relay_private_credentials.py", "dist/old-package.zip",
+            "monitor/auth/console.key", "monitor/logs/monitor.log",
+            ".console-updates/backup/task.xml", ".relay/console-backups/gateway.json",
         ]
         marker = hashlib.sha256(str(self.root).encode()).hexdigest()
         for name in private:

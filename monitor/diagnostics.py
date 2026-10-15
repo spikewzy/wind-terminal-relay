@@ -16,10 +16,10 @@ import time
 import traceback
 import zipfile
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 SEMVER = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
-FRAME_FILES = {"monitor.py", "diagnostics.py", "request.py", "error.py", "threading.py",
+FRAME_FILES = {"monitor.py", "diagnostics.py", "management.py", "request.py", "error.py", "threading.py",
                "ssl.py", "socket.py", "client.py", "pathlib.py", "__init__.py"}
 JOB_KEYS = {"job_id", "client_id", "tool", "state", "display_state", "created_at", "updated_at",
             "age_seconds", "result_ok", "mode", "cached", "error_code", "receipt_id", "native_data_return"}
@@ -199,7 +199,7 @@ class Recorder:
     def bundle(self, snapshot, source_dir):
         now = time.time()
         hashes = {}
-        for name in ("monitor.py", "diagnostics.py", "index.html", "Install.ps1"):
+        for name in ("monitor.py", "diagnostics.py", "management.py", "index.html", "Install.ps1"):
             try:
                 hashes[name] = hashlib.sha256((Path(source_dir)/name).read_bytes()).hexdigest()
             except OSError:

@@ -26,18 +26,24 @@ jobs:
         run: python -m pip check
       - name: Offline tests without a Wind installation
         run: python -m unittest discover -s tests -v
-      - name: Parse Windows monitor installer without running it
+      - name: Parse Windows console scripts without running them
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $monitorTokens = $null
-          $monitorParseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'monitor/Install.ps1'), [ref]$monitorTokens, [ref]$monitorParseErrors) | Out-Null
-          if ($monitorParseErrors.Count) { throw ($monitorParseErrors | Out-String) }
+          foreach ($file in @('Update.ps1','monitor/Install.ps1','.github/windows-console-smoke.ps1')) {
+            $consoleTokens = $null
+            $consoleParseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$consoleTokens, [ref]$consoleParseErrors) | Out-Null
+            if ($consoleParseErrors.Count) { throw ($consoleParseErrors | Out-String) }
+          }
       - name: Build independent source package
         run: python build_release.py
-      - name: Build portable read-only monitor
+      - name: Build unified console and updater
         run: python monitor/build_package.py
+      - name: Install and upgrade console against a synthetic Windows deployment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/windows-console-smoke.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: wind-terminal-relay-${{ matrix.os }}

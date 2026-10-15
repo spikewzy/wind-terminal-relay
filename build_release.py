@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parent
 def payload(root=ROOT):
     root = Path(root)
     exact = [
-        "README.md", "INSTALL.md", "LICENSE", "build_release.py",
-        ".gitignore", ".gitattributes", ".github/workflows/checks.yml",
+        "README.md", "INSTALL.md", "LICENSE", "build_release.py", "Update.cmd", "Update.ps1", "START-HERE.txt",
+        ".gitignore", ".gitattributes", ".github/workflows/checks.yml", ".github/windows-console-smoke.ps1",
         "requirements.in", "requirements-gateway.in", "requirements.lock.txt",
         "requirements-gateway.lock.txt", "references/relay-tool-contract.json",
         "relay_client.py", "relay_gateway.py", "relay_worker.py", "relay_setup.py",
@@ -25,7 +25,7 @@ def payload(root=ROOT):
     # root scripts which might contain private deployment configuration.
     if (root / "relay_admin.py").exists() or (root / "relay_admin.py").is_symlink():
         files.add(root / "relay_admin.py")
-    for name in ("monitor.py", "diagnostics.py", "index.html", "Start.cmd", "Install.ps1", "README.md", "build_package.py", "Export-Diagnostics.cmd"):
+    for name in ("monitor.py", "diagnostics.py", "management.py", "index.html", "Start.cmd", "Install.ps1", "README.md", "build_package.py", "Export-Diagnostics.cmd"):
         if (root / "monitor" / name).exists() or (root / "monitor" / name).is_symlink():
             files.add(root / "monitor" / name)
     files.update((root / "wind_relay").glob("*.py"))
