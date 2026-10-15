@@ -19,5 +19,7 @@ gateway.json
 worker.json
 admin.json
 *.admin.lock
+monitor/logs/
+monitor/diagnostics/
 !examples/*.example.json
 

@@ -16,11 +16,17 @@ import re
 import shutil
 import socket
 import sqlite3
+import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+try:
+    from .diagnostics import VERSION, Recorder, bundle_name
+except ImportError:  # Running this portable file directly, outside a package.
+    from diagnostics import VERSION, Recorder, bundle_name
 
 HERE = Path(__file__).resolve().parent
 IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
@@ -161,7 +167,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # Bearer credentials never follow redirects.
 
 
-def probe(url, token):
+def probe(url, token, recorder=None, stage="gateway_probe"):
     parts = urllib.parse.urlsplit(url)
     if (parts.username or parts.password or parts.query or parts.fragment or parts.path not in {"", "/"}
             or not parts.hostname or (parts.scheme != "https" and
@@ -181,49 +187,75 @@ def probe(url, token):
                 "relay_version": safe_label(value.get("relay_version")),
                 "mcp_version": safe_label(str(value.get("mcp_version", "")).replace(".", "_"))}
     except urllib.error.HTTPError as exc:
+        if recorder is not None:
+            recorder.record("probe_failed", stage, "HTTP_"+str(exc.code), exc=exc)
         return {"ok": False, "reason": "HTTP_" + str(exc.code)}
-    except Exception:
-        return {"ok": False, "reason": "NETWORK_OR_TLS_ERROR"}
+    except Exception as exc:
+        reason = getattr(exc, "reason", exc)
+        code = ("DNS_ERROR" if isinstance(reason, socket.gaierror) else
+                "TIMEOUT" if isinstance(reason, TimeoutError) else
+                "TLS_ERROR" if type(reason).__name__ in {"SSLError", "SSLCertVerificationError"} else
+                "INVALID_STATUS_JSON" if isinstance(exc, (ValueError, UnicodeError, AttributeError)) else
+                "NETWORK_ERROR")
+        if recorder is not None:
+            recorder.record("probe_failed", stage, code, exc=exc)
+        return {"ok": False, "reason": code}
 
 
-def collect(config_path, client_path, gateway_port):
+def collect(config_path, client_path, gateway_port, recorder=None):
     now = time.time()
     try:
         path = database_path(config_path)
         value = read_snapshot(path, now)
         value["disk_free_gb"] = round(shutil.disk_usage(path.parent).free / 1024**3, 1)
-    except Exception:
+    except Exception as exc:
         value = {"collected_at": now, "database_ok": False, "reason": "DATABASE_UNAVAILABLE"}
+        if recorder is not None:
+            recorder.record("database_failed", "database", "DATABASE_UNAVAILABLE", exc=exc)
     try:
         client = read_json(client_path)
         token = client["token"]
         if not isinstance(token, str) or not token or "\n" in token or "\r" in token:
             raise ValueError("Invalid token")
         with ThreadPoolExecutor(max_workers=2) as pool:
-            local = pool.submit(probe, "http://127.0.0.1:" + str(gateway_port), token)
-            public = pool.submit(probe, client["url"], token)
+            local = pool.submit(probe, "http://127.0.0.1:" + str(gateway_port), token, recorder, "gateway_local")
+            public = pool.submit(probe, client["url"], token, recorder, "gateway_public")
             value["gateway"] = local.result()
             value["public_access"] = public.result()
-    except Exception:
+    except Exception as exc:
         value["gateway"] = {"ok": None, "reason": "CLIENT_CONFIG_UNAVAILABLE"}
         value["public_access"] = {"ok": None, "reason": "CLIENT_CONFIG_UNAVAILABLE"}
+        if recorder is not None:
+            recorder.record("configuration_failed", "client_config", "CLIENT_CONFIG_UNAVAILABLE", exc=exc)
     value["probe_finished_at"] = time.time()
     return value
 
 
 class Monitor:
-    def __init__(self, config, client, port, interval):
+    def __init__(self, config, client, port, interval, recorder=None):
         self.config, self.client, self.port, self.interval = config, client, port, interval
         self.stop = threading.Event()
         self.lock = threading.Lock()
         self.value = {"loading": True, "collected_at": time.time()}
+        self.recorder = recorder if recorder is not None else Recorder()
 
     def run(self):
         while not self.stop.is_set():
-            value = collect(self.config, self.client, self.port)
+            try:
+                value = collect(self.config, self.client, self.port, self.recorder)
+                self.recorder.observe(value)
+            except Exception as exc:
+                self.recorder.record("collection_crashed", "monitor", "MONITOR_COLLECTION_FAILED", exc=exc)
+                value = {"collected_at": time.time(), "database_ok": False, "reason": "MONITOR_COLLECTION_FAILED"}
+            value["diagnostics"] = {"version": VERSION, "logging_available": self.recorder.available}
             with self.lock:
                 self.value = value
             self.stop.wait(self.interval)
+
+    def export(self):
+        with self.lock:
+            value = self.value
+        return self.recorder.bundle(value, HERE)
 
 
 def make_server(monitor, port):
@@ -237,6 +269,9 @@ def make_server(monitor, port):
                 self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             super().server_bind()
 
+        def handle_error(self, request, client_address):
+            monitor.recorder.record("request_failed", "http_server", "MONITOR_HTTP_ERROR", exc=sys.exc_info()[1])
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -247,18 +282,24 @@ def make_server(monitor, port):
                     self.headers["Origin"] not in {"http://" + h for h in hosts}):
                 self.send_error(403)
                 return
+            filename = None
             if self.path == "/":
                 data, mime = (HERE / "index.html").read_bytes(), "text/html; charset=utf-8"
             elif self.path == "/api/status":
                 with monitor.lock:
                     data = json.dumps(monitor.value, ensure_ascii=False, allow_nan=False).encode()
                 mime = "application/json; charset=utf-8"
+            elif self.path == "/api/diagnostics":
+                monitor.recorder.record("diagnostics_exported", "export", "DIAGNOSTICS_EXPORTED")
+                data, mime, filename = monitor.export(), "application/zip", bundle_name()
             else:
                 self.send_error(404)
                 return
             self.send_response(200)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(data)))
+            if filename is not None:
+                self.send_header("Content-Disposition", 'attachment; filename="'+filename+'"')
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -275,13 +316,40 @@ def main():
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--gateway-port", type=int, default=8765)
     parser.add_argument("--interval", type=int, default=10)
+    parser.add_argument("--log-dir", type=Path, default=HERE / "logs")
+    parser.add_argument("--export-diagnostics", action="store_true", help="Export without starting or requiring the monitor server")
+    parser.add_argument("--output", type=Path, help="Diagnostic ZIP destination; defaults to monitor/diagnostics/")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535 or not 1 <= args.gateway_port <= 65535 or args.interval < 5:
         parser.error("Use an unprivileged monitor port and interval >= 5 seconds")
-    monitor = Monitor(args.config, args.client_config, args.gateway_port, args.interval)
+    # CLI export must not open a second rotating writer while the service may
+    # still be running; it reads prior logs and keeps fresh checks in memory.
+    recorder = Recorder(args.log_dir, read_only=args.export_diagnostics)
+    recorder.record("started", "startup", "MONITOR_STARTED")
+    monitor = Monitor(args.config, args.client_config, args.gateway_port, args.interval, recorder)
+    if args.export_diagnostics:
+        try:
+            monitor.value = collect(args.config, args.client_config, args.gateway_port, recorder)
+            recorder.observe(monitor.value)
+            recorder.record("diagnostics_exported", "export", "DIAGNOSTICS_EXPORTED")
+            output = args.output or HERE / "diagnostics" / bundle_name()
+            output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # Never silently overwrite a previous diagnostic bundle.
+            with output.open("xb") as file:
+                output.chmod(0o600)
+                file.write(monitor.export())
+            print("Diagnostic ZIP: " + str(output.resolve()), flush=True)
+        except Exception as exc:
+            recorder.record("export_failed", "export", "DIAGNOSTICS_EXPORT_FAILED", exc=exc)
+            parser.exit(1, "Diagnostic export failed; check the monitor logs or choose another output file.\n")
+        finally:
+            recorder.close()
+        return
     try:
         server = make_server(monitor, args.port)
-    except OSError:
+    except OSError as exc:
+        recorder.record("startup_failed", "listener", "MONITOR_PORT_UNAVAILABLE", exc=exc)
+        recorder.close()
         parser.exit(1, "Monitor port unavailable; check the existing monitor. No new instance started.\n")
     thread = threading.Thread(target=monitor.run, daemon=True)
     thread.start()
@@ -290,10 +358,15 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    except Exception as exc:
+        recorder.record("server_crashed", "http_server", "MONITOR_SERVER_FAILED", exc=exc)
+        raise SystemExit("Monitor stopped after an error; export diagnostics to inspect it.") from None
     finally:
         monitor.stop.set()
         server.server_close()
         thread.join(timeout=10)
+        recorder.record("stopped", "shutdown", "MONITOR_STOPPED")
+        recorder.close()
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ def payload(root=ROOT):
     # root scripts which might contain private deployment configuration.
     if (root / "relay_admin.py").exists() or (root / "relay_admin.py").is_symlink():
         files.add(root / "relay_admin.py")
-    for name in ("monitor.py", "index.html", "Start.cmd", "Install.ps1", "README.md", "build_package.py"):
+    for name in ("monitor.py", "diagnostics.py", "index.html", "Start.cmd", "Install.ps1", "README.md", "build_package.py", "Export-Diagnostics.cmd"):
         if (root / "monitor" / name).exists() or (root / "monitor" / name).is_symlink():
             files.add(root / "monitor" / name)
     files.update((root / "wind_relay").glob("*.py"))

@@ -11,8 +11,10 @@ $gatewayConfig = Join-Path $appDir '.relay\gateway.json'
 $probeConfig = Join-Path $appDir '.relay\client-owner.json'
 $monitorScript = Join-Path $monitorDir 'monitor.py'
 $monitorHtml = Join-Path $monitorDir 'index.html'
+$diagnosticLauncher = Join-Path $monitorDir 'Export-Diagnostics.cmd'
+$diagnosticModule = Join-Path $monitorDir 'diagnostics.py'
 $taskName = 'WindRelayMonitor'
-foreach ($file in @($pythonExe, $gatewayConfig, $probeConfig, $monitorScript, $monitorHtml)) {
+foreach ($file in @($pythonExe, $gatewayConfig, $probeConfig, $monitorScript, $monitorHtml, $diagnosticLauncher, $diagnosticModule)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
         throw "Required file missing: $file. Extract monitor into the existing app directory."
     }
@@ -41,6 +43,12 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
 Start-ScheduledTask -TaskName $taskName
 $shortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'WindRelay-Monitor.url'
 Set-Content -LiteralPath $shortcut -Encoding Ascii -Value "[InternetShortcut]`r`nURL=http://127.0.0.1:8766/"
+$diagnosticShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'WindRelay-Diagnostics.lnk'
+$shortcutShell = New-Object -ComObject WScript.Shell
+$diagnosticShortcut = $shortcutShell.CreateShortcut($diagnosticShortcutPath)
+$diagnosticShortcut.TargetPath = $diagnosticLauncher
+$diagnosticShortcut.WorkingDirectory = $monitorDir
+$diagnosticShortcut.Save()
 Write-Host 'Monitor task installed and start requested. Gateway and worker were not restarted.'
 Write-Host 'Open http://127.0.0.1:8766/ in the browser ON THIS CLOUD COMPUTER.'
 Write-Host 'Allow a few seconds, then confirm the page updates. A start request alone is not health verification.'

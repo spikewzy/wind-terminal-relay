@@ -1,10 +1,15 @@
-"""Build only the five portable monitor files. Never include deployment state."""
+"""Build only reviewed portable monitor files. Never include deployment state."""
 import hashlib
 import json
 from pathlib import Path
 import zipfile
 
-FILES = ("monitor.py", "index.html", "Start.cmd", "Install.ps1", "README.md")
+try:
+    from .diagnostics import VERSION
+except ImportError:
+    from diagnostics import VERSION
+
+FILES = ("monitor.py", "diagnostics.py", "index.html", "Start.cmd", "Install.ps1", "README.md", "Export-Diagnostics.cmd")
 
 
 def build(destination=None):
@@ -13,11 +18,11 @@ def build(destination=None):
     if destination.is_symlink():
         raise ValueError("Unsafe output directory")
     destination.mkdir(parents=True, exist_ok=True)
-    archive = destination / "wind-relay-monitor-0.1.0.zip"
+    archive = destination / ("wind-relay-monitor-"+VERSION+".zip")
     checksum = archive.with_suffix(".zip.sha256")
     if archive.is_symlink() or checksum.is_symlink():
         raise ValueError("Unsafe output file")
-    manifest = {"kind": "standalone_read_only_relay_monitor", "version": "0.1.0", "files": {}}
+    manifest = {"kind": "standalone_read_only_relay_monitor", "version": VERSION, "files": {}}
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
         for name in FILES:
             path = root / name

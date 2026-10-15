@@ -13,7 +13,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\WindRelay\app\monito
 
 3. 浏览器打开 `http://127.0.0.1:8766/`，等待十几秒，看时间是否持续更新。以后双击云电脑桌面的 `WindRelay-Monitor` 即可。
 
-安装器只增加 `WindRelayMonitor` 任务和桌面入口。它开机后在后台运行，不需要打开 PowerShell。原来的 `WindRelayGateway` 仍按原方式运行；关掉监控页不会关网关。监控器自己的端口为 8766，网关仍为 8765。
+安装器只增加 `WindRelayMonitor` 任务和桌面入口，包括 `WindRelay-Monitor` 查看入口与 `WindRelay-Diagnostics` 诊断入口。它开机后在后台运行，不需要打开 PowerShell。原来的 `WindRelayGateway` 仍按原方式运行；关掉监控页不会关网关。监控器自己的端口为 8766，网关仍为 8765。
 
 如果 PowerShell 提示已有监控任务，请去任务计划程序找 `WindRelayMonitor`，不要重复安装。如果使用过临时 `Start.cmd`，先在那个窗口按 Ctrl+C 停止临时监控，再安装后台任务；不用停网关。
 
@@ -50,6 +50,26 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\WindRelay\app\monito
 
 不再使用时，到任务计划程序结束并删除 **WindRelayMonitor**，再删除桌面入口和 `monitor` 文件夹；不要删除 `WindRelayGateway` 或 `.relay`。
 
+## 出问题时，发什么来排查
+
+监控附件 **0.1.1** 开始提供滚动日志与诊断包。
+
+1. 页面能打开：点右上角 **导出诊断包**，浏览器会下载一个 `wind-relay-diagnostics-日期时间.zip`。
+2. 页面打不开：双击桌面的 **WindRelay-Diagnostics**；没有这个入口时，双击 `C:\WindRelay\app\monitor\Export-Diagnostics.cmd`。它不需要监控器已运行，也不会启动第二个监控服务，导出的 ZIP 放在当前用户的“下载”文件夹。
+3. 将 ZIP 发给 agent，再写一句“几点出现、当时做了什么”，例如“北京时间 15:20 取螺纹钢数据时一直排队”。不需要发送配置、token 或数据库。
+
+包里包含：当前可读状态、最近保留的任务与错误码、故障阶段、错误类型与系统错误号、经过筛选的代码位置、监控版本、Python / SQLite 版本及公开文件校验值。DNS、连接、证书、超时、配置与数据库错误可以分别定位。页面导出使用已有快照；离线导出只做一次状态检查，不提交 Wind 任务，也不会与正在运行的监控器争抢日志写入。
+
+默认日志在 `C:\WindRelay\app\monitor\logs\monitor.log`，单份约 1 MiB，保留当前与三份轮换文件，总量约 4 MiB。日志记录故障和状态变化，正常状态每五分钟留一条检查点，失败任务不会每次刷新重复写入。诊断包最多收集最近 1000 条可读事件；不是完整历史或官方调用账单。
+
+不打包配置全文、数据库、凭据、查询参数、行情正文、原始异常文本或未过滤的网关/执行端日志。异常只保留类型、错误号与允许的代码位置，不保存可能含 token 的错误字符串。即使日志目录不可写，页面仍尽量运行，诊断包会注明未落盘，并带上当前可读状态。
+
+云端看不到取数电脑的原始日志、halt / inflight 文件，因此诊断包不能包办所有执行端故障；必要时再请那台电脑上的 agent 补查。
+
+## 从监控 0.1.0 更新
+
+在任务计划程序中，只结束 **WindRelayMonitor**，覆盖 `monitor` 文件夹里的新版程序文件，再点该任务的“运行”。保留已有 `logs` 与 `diagnostics` 文件夹，不要删除历史。**不要结束 WindRelayGateway，也不用重装 MCP。** 原来已安装任务时不必再次运行 Install.ps1；旧版没有桌面诊断入口，可直接运行文件夹里的 Export-Diagnostics.cmd。
+
 ## 让 agent 帮你安装
 
 > 请安装这个独立 Wind 中继监控器。将 monitor 文件夹放进现有网关安装目录，先检查 Python、gateway.json、client-owner.json 和 8766 端口；阅读 monitor/README.md，再运行 Install.ps1。保留现有网关、取数执行端和凭据，不启动第二份网关，不导入 WindPy，不取行情，不输出 token，不清理故障标记。完成后检查 WindRelayMonitor 任务和浏览器页面的状态更新时间；区分安装成功、监控器可用和取数线路状态，不把在线心跳当成真实取数验证。
@@ -58,4 +78,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\WindRelay\app\monito
 
 Mac / Linux 管理机同样可以用 `python3 monitor/monitor.py --config /path/to/gateway.json --client-config /path/to/client-owner.json`，但必须有网关本地数据库；这是网关侧监控器，不是普通设备的接入客户端。自动安装脚本仅面向 Windows。
 
-监控不写入数据库或调用其维护函数，不修改 halt / inflight，不重试或取消任务，不自动登录 Wind。没有持久化监控历史或外部推送通知。云电脑或监控进程关机后，页面只能提示刷新中断，不能继续在停机的机器上监控。取数电脑的本地 halt / inflight 文件不在云端，不能直接显示。
+监控不写入数据库或调用其维护函数，不修改 halt / inflight，不重试或取消任务，不自动登录 Wind。有限事件日志不替代完整审计历史；没有外部推送通知。云电脑或监控进程关机后，页面只能提示刷新中断，不能继续在停机的机器上监控。取数电脑的本地 halt / inflight 文件不在云端，不能直接显示。
