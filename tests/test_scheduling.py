@@ -178,14 +178,16 @@ class SchedulingTests(unittest.TestCase):
             self.assertFalse(path.exists())
 
     def test_existing_schema_migrates_without_losing_pending_jobs(self):
+        from contextlib import closing
         path = Path(self.temp.name) / "old.sqlite"
-        with sqlite3.connect(path) as con:
+        with closing(sqlite3.connect(path)) as con:
             con.execute("""CREATE TABLE jobs (
                 id TEXT PRIMARY KEY, owner TEXT NOT NULL, payload TEXT NOT NULL,
                 state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
                 lease TEXT, lease_until REAL, result TEXT)""")
             con.execute("INSERT INTO jobs VALUES(?,?,?,'queued',?,?,NULL,NULL,NULL)",
                         ("1" * 32, "a", '{"tool":"wind_status","arguments":{}}', self.now, self.now))
+            con.commit()
         migrated = Queue(path, clock=lambda: self.now)
         self.assertEqual(migrated.get("a", "1" * 32)["state"], "queued")
         self.assertEqual(migrated.claim("mock")["job_id"], "1" * 32)

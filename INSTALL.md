@@ -168,7 +168,7 @@ python -m unittest discover -s tests -v
 python build_release.py
 ```
 
-没有原核心的环境只能验证客户端、网关和队列；核心适配专项测试应有明确跳过说明，不能把它计为实机成功。GitHub 工作流配置了 macOS、Windows、Linux 的 Python 3.12 离线检查，首次实际运行结果仍须查看。
+没有原核心的环境只能验证客户端、网关和队列；核心适配专项测试应有明确跳过说明，不能把它计为实机成功。GitHub 工作流执行 macOS、Windows、Linux 的 Python 3.12 离线检查，结果与实机验收边界见 [验收记录](docs/VERIFICATION.md)。
 
 发布包 `dist/wind-terminal-relay-0.1.0.zip` 只包含 allowlist 源码、文档、模板和测试，附逐文件哈希与包哈希。不要把 `.relay`、token、数据库、Wind SDK 或其他用户回执添加到包里。
 

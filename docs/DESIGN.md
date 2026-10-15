@@ -52,7 +52,7 @@ Wind 官方剩余额度、账号外的人工操作/其他软件用量、SDK 实�
 
 ## GitHub 与版本
 
-建议现有公开仓库 `wind-terminal-mcp` 的主分支保持本地产品；新仓库使用 `wind-terminal-relay`，独立 README、安装步骤、发布包、测试和版本。现有 relay 试验分支与 PR 保留为迁移历史，未合并进本地产品主分支。本目录整理不代表已创建或发布新 GitHub 仓库。
+本地产品保留在 [wind-terminal-mcp](https://github.com/spikewzy/wind-terminal-mcp)；中继源码独立发布在 [wind-terminal-relay](https://github.com/spikewzy/wind-terminal-relay)，分别维护 README、安装步骤、发布包、测试和版本。原 relay 试验分支与 PR 作为迁移历史保留，不合并进本地产品主分支。GitHub 发布不代表现有云端及执行电脑已迁移。
 
 relay 升级不直接升级 core。执行端配置 `mcp_root` 指向已有本地项目，读取随 relay 发布的工具契约并核对 `server.py` 哈希；core 升级后需要重新生成、验证契约，再发布兼容的 relay 版本，不能关闭校验强行兼容。
 

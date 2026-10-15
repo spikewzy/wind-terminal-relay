@@ -63,6 +63,12 @@ class RollingWindowTests(unittest.TestCase):
         self.assertEqual(value["wind_quota_reset"], "rolling_7x24_hours_no_midnight_reset")
         self.assertFalse(value["reservation_observation_window"]["full_wind_account_coverage"])
 
+    def test_rolling_window_before_unix_epoch_formats_on_every_platform(self):
+        self.now = 1000
+        value = self.snapshot()
+        self.assertEqual(value["window"]["from"], "1969-12-25T00:16:40+00:00")
+        self.assertEqual(value["window"]["through"], "1970-01-01T00:16:40+00:00")
+
     def test_exact_seven_day_boundary_expires_only_after_full_duration(self):
         self.execute()
         self.now += WEEK

@@ -21,6 +21,12 @@ COUNTERS = ("native_preflight_reservations", "known_estimated_cells",
 TERMINAL = {"completed", "failed", "cancelled", "expired"}
 
 
+def utc_iso_timestamp(value):
+    """Format UTC without platform C-runtime limits on negative timestamps."""
+    epoch = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+    return (epoch + dt.timedelta(seconds=value)).isoformat()
+
+
 def quota_failure(result):
     """A failed current result only; successful historical evidence is ignored."""
     def contains(value):
@@ -228,7 +234,7 @@ class UsageLedger:
                         "by_execution_mode": observations},
                     "quota_observations": {
                         "basis": "gateway_result_delivery_time", "native_failure_count_observed": len(failures),
-                        "last_native_failure_at": dt.datetime.fromtimestamp(max(row[2] for row in failures), dt.timezone.utc).isoformat() if failures else None,
+                        "last_native_failure_at": utc_iso_timestamp(max(row[2] for row in failures)) if failures else None,
                         "observed_result_count": len(quota_events),
                         "results_without_quota_observation": sum(row["state"] in {"completed", "failed"} and row["owner"] in owners for row in observation_rows) - len(quota_events),
                         "quota_recovery_at": None,
@@ -240,8 +246,8 @@ class UsageLedger:
             owners.append(owner)
         result = {"ok": True, "scope": "own_client" if owner is not None else "administrator",
                   "window": {"timezone": "UTC", "days": days,
-                             "from": dt.datetime.fromtimestamp(cutoff, dt.timezone.utc).isoformat(),
-                             "through": dt.datetime.fromtimestamp(now, dt.timezone.utc).isoformat(),
+                             "from": utc_iso_timestamp(cutoff),
+                             "through": utc_iso_timestamp(now),
                              "cohort": "jobs_accepted_in_window"},
                   "account_quota": False, "wind_account_remaining": None,
                   "wind_official_limit": None, "wind_quota_window_seconds": 7 * 86400,
