@@ -121,6 +121,10 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         for connection in self.connections:
             await connection.close()
+        # Cancelling an ASGI heartbeat coroutine does not cancel its SQLite
+        # to_thread call. Drain those calls before deleting the Windows fixture;
+        # IsolatedAsyncioTestCase otherwise drains them only after tearDown.
+        await asyncio.get_running_loop().shutdown_default_executor()
         self.temp.cleanup()
 
     async def submit(self, connection=None, job="1" * 32):
