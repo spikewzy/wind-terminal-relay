@@ -45,7 +45,7 @@ class UpgradeTests(unittest.TestCase):
 
     def test_package_and_read_only_inspection(self):
         self.assertEqual(verify_package(self.package)['version'],'0.1.1')
-        self.assertIn('双击 Upgrade-Gateway.cmd',(self.package/'START-HERE.txt').read_text())
+        self.assertIn('双击 Upgrade-Gateway.cmd',(self.package/'START-HERE.txt').read_text(encoding='utf-8'))
         before={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (self.app/'.relay').glob('*.json')}
         self.assertTrue(inspect(self.app,self.package)['idle'])
         after={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (self.app/'.relay').glob('*.json')}
