@@ -5,7 +5,7 @@ $root = Join-Path $env:RUNNER_TEMP ('gateway-upgrade-'+[guid]::NewGuid().ToStrin
 $app = Join-Path $root 'app'
 $package = Join-Path $root 'package'
 New-Item -ItemType Directory -Path (Join-Path $app '.relay'),(Join-Path $app 'references') -Force | Out-Null
-Expand-Archive -LiteralPath (Join-Path $PWD 'dist/wind-relay-gateway-upgrade-0.1.1.zip') -DestinationPath $package
+Expand-Archive -LiteralPath (Join-Path $PWD 'dist/wind-relay-gateway-upgrade-0.1.2.zip') -DestinationPath $package
 Copy-Item 'references/relay-tool-contract.json' (Join-Path $app 'references/relay-tool-contract.json')
 $fixture = @'
 import hashlib,json,pathlib,sqlite3,sys
@@ -60,12 +60,12 @@ try {
  if (Test-Path (Join-Path $app '.gateway-releases')) { throw 'CheckOnly wrote files.' }
  & $updater -AppDirectory $app -PythonExe $python -NoOpen
  $after=Wait-Gateway
- if ($after.relay_version -ne '0.1.1' -or $after.deployment.scheduler -ne 'client_round_robin' -or $after.maintenance_mode -or $after.queue_policy.client_pending_limit -ne 5) { throw 'Runtime upgrade not verified.' }
+ if ($after.relay_version -ne '0.1.2' -or $after.deployment.scheduler -ne 'client_round_robin' -or $after.maintenance_mode -or $after.queue_policy.client_pending_limit -ne 5) { throw 'Runtime upgrade not verified.' }
  if ((Get-FileHash (Join-Path $app '.relay/gateway.json')).Hash -ne $configHash -or (Get-FileHash (Join-Path $app '.relay/client-owner.json')).Hash -ne $ownerHash -or (Get-FileHash (Join-Path $app 'server.py')).Hash -ne $coreHash) { throw 'Credentials or core changed.' }
  $report=Get-Content -Raw (Join-Path $app '.relay/deployment-current.json') | ConvertFrom-Json
- if ($report.upgrade.outcome -ne 'activated' -or $report.gateway.version -ne '0.1.1' -or $report.worker.version_verified) { throw 'Deployment report invalid.' }
+ if ($report.upgrade.outcome -ne 'activated' -or $report.gateway.version -ne '0.1.2' -or $report.worker.version_verified) { throw 'Deployment report invalid.' }
  $consoleReport=Invoke-RestMethod 'http://127.0.0.1:8766/api/deployment-report'
- if ($consoleReport.console_version -ne '0.2.1' -or $consoleReport.deployment.gateway_version -ne '0.1.1') { throw 'Console deployment report invalid.' }
+ if ($consoleReport.console_version -ne '0.3.0' -or $consoleReport.deployment.gateway_version -ne '0.1.2') { throw 'Console deployment report invalid.' }
  # Prove actual rotation with HTTP jobs and synthetic completions. No Wind SDK.
  foreach ($entry in @(@('2',$headers),@('3',$headers),@('4',$colleagueHeaders))) {
   $body=@{job_id=($entry[0]*32);tool='wind_status';arguments=@{connect=$false}} | ConvertTo-Json -Depth 4 -Compress
@@ -118,8 +118,59 @@ con.close()
  if ($LASTEXITCODE) { throw 'Rollback lost tasks/dedupe or left a failed migration.' }
  if (Test-Path (Join-Path $app '.relay/gateway-maintenance.json')) { throw 'Own failed-upgrade marker not removed after verified rollback.' }
  Write-Host 'WINDOWS_GATEWAY_LEGACY_UPGRADE_ROTATION_REPORT_AND_ROLLBACK_OK; NO WIND WAS STARTED.'
+ # Rehearse a manual online update through the installed HTTP API. Only the
+ # metadata/archive fetch is replaced by a local synthetic Gitee mirror.
+ # The actual downloader, verifier, separate SYSTEM task and installers run.
+ Stop-ScheduledTask -TaskName 'WindRelayMonitor'
+ for ($attempt=0;$attempt -lt 15;$attempt++) {
+  if (-not (Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue)) { break }
+  Start-Sleep -Seconds 1
+ }
+ $fixtureConsole=Join-Path $PWD '.github/online-update-fixture.py'
+ $originalConsole=Join-Path $app 'monitor/monitor.py'
+ $zip=Join-Path $PWD 'dist/wind-relay-gateway-upgrade-0.1.2.zip'
+ $fixtureAction=New-ScheduledTaskAction -Execute $python -Argument ('"{0}" "{1}" "{2}" "{3}"' -f $fixtureConsole,$originalConsole,$app,$zip) -WorkingDirectory (Join-Path $app 'monitor')
+ Set-ScheduledTask -TaskName 'WindRelayMonitor' -Action $fixtureAction | Out-Null
+ Start-ScheduledTask -TaskName 'WindRelayMonitor'
+ $fixtureReady=$false
+ for ($attempt=0;$attempt -lt 25;$attempt++) {
+  try {
+   $state=Invoke-RestMethod 'http://127.0.0.1:8766/api/status' -TimeoutSec 2
+   $updates=Invoke-RestMethod 'http://127.0.0.1:8766/api/updates' -TimeoutSec 2
+   if ($state.demonstration -and $updates.checked_at -and $updates.releases[0].eligible) { $fixtureReady=$true;break }
+  } catch { }
+  Start-Sleep -Seconds 1
+ }
+ if (-not $fixtureReady) { throw 'Synthetic online console did not initialize.' }
+ if ((Test-Path (Join-Path $app '.relay/fixture-archive-downloaded.txt')) -or (Get-ScheduledTask -TaskName 'WindRelayUpgrade' -ErrorAction SilentlyContinue)) { throw 'Version check automatically installed/downloaded an archive.' }
+ $consoleKey=(Get-Content -Raw (Join-Path $app 'monitor/auth/console.key')).Trim()
+ $desktopAccessBefore=(Get-Acl -LiteralPath (Join-Path $app 'monitor/auth')).Sddl
+ $consoleHeaders=@{'X-Console-Token'=$consoleKey}
+ $requested=Invoke-RestMethod 'http://127.0.0.1:8766/api/updates/install' -Method Post -Headers $consoleHeaders -ContentType 'application/json' -Body '{"gateway_version":"0.1.2","confirmed":true}'
+ if (-not $requested.operation_id) { throw 'No durable update operation.' }
+ $onlineCompleted=$false
+ for ($attempt=0;$attempt -lt 90;$attempt++) {
+  try {
+   $updates=Invoke-RestMethod 'http://127.0.0.1:8766/api/updates' -TimeoutSec 2
+   if ($updates.operation.state -eq 'succeeded') { $onlineCompleted=$true;break }
+   if ($updates.operation.state -eq 'failed' -or $updates.operation.state -eq 'interrupted') { throw ('Online upgrade ended: '+$updates.operation.error_code) }
+  } catch {
+   # Service restart briefly removes the old console listener.
+   if ($_.Exception.Message -like 'Online upgrade ended:*') { throw }
+  }
+  Start-Sleep -Seconds 1
+ }
+ if (-not $onlineCompleted) {
+  Get-Content -LiteralPath (Join-Path $app ('.relay/online-updates/'+$requested.operation_id+'/installer.log')) -Tail 80 -ErrorAction SilentlyContinue
+  throw 'Independent online upgrade task did not finish across console restart.'
+ }
+ $current=Invoke-RestMethod 'http://127.0.0.1:8766/api/status'
+ if ($current.demonstration -or $current.diagnostics.version -ne '0.3.0' -or $current.deployment.gateway_version -ne '0.1.2') { throw 'New real console/runtime versions were not verified.' }
+ if ((Get-FileHash (Join-Path $app '.relay/gateway.json')).Hash -ne $configHash -or (Get-FileHash (Join-Path $app '.relay/client-owner.json')).Hash -ne $ownerHash -or (Get-Content -Raw (Join-Path $app 'monitor/auth/console.key')).Trim() -ne $consoleKey) { throw 'Online update changed credentials.' }
+ if ((Get-Acl -LiteralPath (Join-Path $app 'monitor/auth')).Sddl -ne $desktopAccessBefore) { throw 'SYSTEM update changed the desktop user access rules.' }
+ Write-Host 'WINDOWS_MANUAL_ONLINE_UPDATE_SURVIVED_CONSOLE_RESTART_OK; SYNTHETIC MIRROR, NO WIND.'
 } finally {
- foreach ($task in @('WindRelayGateway','WindRelayMonitor')) {
+ foreach ($task in @('WindRelayUpgrade','WindRelayGateway','WindRelayMonitor')) {
   Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
  }

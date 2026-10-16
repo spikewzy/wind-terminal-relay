@@ -5,7 +5,7 @@ $fixtureRoot = Join-Path $env:RUNNER_TEMP ('console-smoke-'+[guid]::NewGuid().To
 $packageRoot = Join-Path $fixtureRoot 'package'
 $app = Join-Path $fixtureRoot 'app'
 New-Item -ItemType Directory -Path (Join-Path $app '.relay') -Force | Out-Null
-Expand-Archive -LiteralPath (Join-Path $PWD 'dist/wind-relay-console-0.2.1.zip') -DestinationPath $packageRoot
+Expand-Archive -LiteralPath (Join-Path $PWD 'dist/wind-relay-console-0.3.0.zip') -DestinationPath $packageRoot
 $setup = @'
 import hashlib,json,pathlib,sqlite3,sys
 root=pathlib.Path(sys.argv[1])/'.relay'
@@ -29,7 +29,7 @@ try {
     $key = (Get-Content -Raw $keyFile).Trim()
     $headers = @{ 'X-Console-Token' = $key }
     $status = Invoke-RestMethod 'http://127.0.0.1:8766/api/status'
-    if ($status.diagnostics.version -ne '0.2.1') { throw 'Wrong installed console version.' }
+    if ($status.diagnostics.version -ne '0.3.0') { throw 'Wrong installed console version.' }
     $devices = Invoke-RestMethod 'http://127.0.0.1:8766/api/manage/devices' -Headers $headers
     if ($devices.clients[0].client_id -ne 'owner') { throw 'Management endpoint did not initialize.' }
     & $updater -AppDirectory $app -PythonExe $python -NoOpen
@@ -59,7 +59,7 @@ try {
     for ($attempt=0; $attempt -lt 10; $attempt++) {
         try {
             $status = Invoke-RestMethod 'http://127.0.0.1:8766/api/status' -TimeoutSec 2
-            if ($status.diagnostics.version -eq '0.2.1') { $restored = $true; break }
+            if ($status.diagnostics.version -eq '0.3.0') { $restored = $true; break }
         } catch { }
         Start-Sleep -Seconds 1
     }

@@ -16,10 +16,10 @@ import time
 import traceback
 import zipfile
 
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 SEMVER = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
-FRAME_FILES = {"monitor.py", "diagnostics.py", "management.py", "request.py", "error.py", "threading.py",
+FRAME_FILES = {"monitor.py", "diagnostics.py", "management.py", "updates.py", "request.py", "error.py", "threading.py",
                "ssl.py", "socket.py", "client.py", "pathlib.py", "__init__.py"}
 JOB_KEYS = {"job_id", "client_id", "tool", "state", "display_state", "created_at", "updated_at",
             "age_seconds", "result_ok", "mode", "cached", "error_code", "receipt_id", "native_data_return"}
@@ -64,6 +64,22 @@ def scalar(value):
     return None
 
 
+def safe_updates(value):
+    if not isinstance(value, dict) or not value:
+        return {}
+    clean = fields(value, {'source','checked_at','check_error','checking','automatic_install','check_interval_hours'})
+    current = value.get('current',{})
+    clean['current'] = {k:v for k,v in current.items() if k in {'gateway_version','console_version'}
+                        and isinstance(v,str) and SEMVER.fullmatch(v)} if isinstance(current,dict) else {}
+    operation = value.get('operation')
+    if isinstance(operation,dict):
+        clean['operation'] = fields(operation, {'operation_id','state','started_at','updated_at','error_code'})
+        for key in ('gateway_version','console_version'):
+            v = operation.get(key)
+            clean['operation'][key] = v if isinstance(v,str) and SEMVER.fullmatch(v) else None
+    return clean
+
+
 def fields(value, keys):
     return {key: scalar(value[key]) for key in keys if key in value} if isinstance(value, dict) else {}
 
@@ -75,6 +91,7 @@ def safe_snapshot(value):
         if name in value:
             clean[name] = fields(value[name], keys)
     clean["deployment"] = safe_deployment(value.get("deployment"))
+    clean['updates'] = safe_updates(value.get('updates'))
     clean["latest_native_data"] = (fields(value.get("latest_native_data"), JOB_KEYS)
                                     if isinstance(value.get("latest_native_data"), dict) else None)
     for name in ("active_jobs", "recent_jobs"):
@@ -218,7 +235,7 @@ class Recorder:
     def bundle(self, snapshot, source_dir):
         now = time.time()
         hashes = {}
-        for name in ("monitor.py", "diagnostics.py", "management.py", "index.html", "Install.ps1"):
+        for name in ("monitor.py", "diagnostics.py", "management.py", "updates.py", "Launch-Upgrade.ps1", "Run-OnlineUpgrade.ps1", "index.html", "Install.ps1"):
             try:
                 hashes[name] = hashlib.sha256((Path(source_dir)/name).read_bytes()).hexdigest()
             except OSError:

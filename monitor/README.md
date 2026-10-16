@@ -1,11 +1,11 @@
-# Wind 中继管理台 0.2.1
+# Wind 中继管理台 0.3.0
 
 把运行监控、设备管理和故障诊断放在一个本地页面。适用于已经部署 Wind 中继网关的 Windows 云电脑，复用已有 Python；不要求云电脑安装 Wind，也不要求重装 MCP。
 
 ## 安装或更新：只做三步
 
-1. 在云电脑下载 `wind-relay-console-0.2.1.zip`，完整解压到一个**新文件夹**，例如桌面上的 `WindConsoleUpdate`。不要直接解压覆盖 `C:\WindRelay\app` 或 Python 文件夹。
-2. 双击 `Update.cmd`，Windows 询问权限时选“是”。默认现有项目在 `C:\WindRelay\app`。看到 `Console 0.2.1 updated` 表示管理台本机版本检查通过。
+1. 在云电脑下载 `wind-relay-console-0.3.0.zip`，完整解压到一个**新文件夹**，例如桌面上的 `WindConsoleUpdate`。不要直接解压覆盖 `C:\WindRelay\app` 或 Python 文件夹。
+2. 双击 `Update.cmd`，Windows 询问权限时选“是”。默认现有项目在 `C:\WindRelay\app`。看到 `Console 0.3.0 updated` 表示管理台本机版本检查通过。
 3. 打开桌面的 **WindRelay-Console**。同一个页面就能看状态、管理设备、导出诊断。
 
 更新只替换管理台文件和 `WindRelayMonitor` 任务，保留 `.relay`、数据库、已有接入文件、管理台密钥和日志。**不重启 WindRelayGateway、不升级网关或信创取数端，也不执行真实取数**。旧程序与任务定义备份在 `app\.console-updates\时间-编号`。更新中发现错误会尝试恢复旧程序与旧监控任务；如果仍失败，保留错误窗口与备份目录联系维护者。
@@ -14,9 +14,11 @@
 
 ## 查看和更新实际部署信息
 
+本版新增 **软件更新**：管理台启动时和每 6 小时从 Gitee 检查版本，你也可手动检查。选版本、点“下载并更新所选版本”并确认后才安装。确认前让同事暂停新任务；原接入文件保留。安装由独立任务执行，管理台重启后能继续读取结果。检查失败不影响现有服务，也不切换到 GitHub。完整说明见仓库的 `docs/ONLINE_UPDATES.md`。
+
 页面的“实际部署信息”直接读取运行中的网关版本、构建号、轮转及限流配置；可点击“导出部署报告”发给维护者。旧网关没有上报版本就显示未报告，执行端版本没有证据就保持未知，不用记住每次改过什么。
 
-要把旧网关本身升级，下载 **wind-relay-gateway-upgrade-0.1.1.zip**，解压到新文件夹，双击 **Upgrade-Gateway.cmd**；它会同时更新管理台。先让同事暂停新任务，保持 Wind、信创服务和 Tailscale 运行。参见更新包内 `gateway_update/README.md`。单独双击 `Update.cmd` 仍只更新管理台。
+要把旧网关本身升级，下载 **wind-relay-gateway-upgrade-0.1.2.zip**，解压到新文件夹，双击 **Upgrade-Gateway.cmd**；它会同时更新管理台。先让同事暂停新任务，保持 Wind、信创服务和 Tailscale 运行。参见更新包内 `gateway_update/README.md`。单独双击 `Update.cmd` 仍只更新管理台。
 
 ## 先看什么
 

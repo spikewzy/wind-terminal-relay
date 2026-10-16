@@ -21,7 +21,8 @@ from monitor.management import safe_path, read, write, protect, ManagementError
 GATEWAY_FILES = {'relay_gateway.py','requirements-gateway.lock.txt','references/relay-tool-contract.json',
                  'wind_relay/__init__.py','wind_relay/common.py','wind_relay/gateway.py',
                  'wind_relay/store.py','wind_relay/usage.py','wind_relay/deployment.py'}
-CONSOLE_FILES = {'monitor/monitor.py','monitor/diagnostics.py','monitor/management.py','monitor/index.html',
+CONSOLE_FILES = {'monitor/monitor.py','monitor/diagnostics.py','monitor/management.py','monitor/updates.py',
+                 'monitor/Launch-Upgrade.ps1','monitor/Run-OnlineUpgrade.ps1','monitor/index.html',
                  'monitor/Start.cmd','monitor/Install.ps1','monitor/README.md','monitor/Export-Diagnostics.cmd',
                  'Update.cmd','Update.ps1','START-HERE.txt','LICENSE','console-manifest.json'}
 UPGRADE_FILES = {'Upgrade-Gateway.cmd','Upgrade-Gateway.ps1','gateway_update/support.py','gateway_update/README.md'}
@@ -45,7 +46,7 @@ def verify_package(root):
     root = safe_path(root)
     value = read(root/'upgrade-manifest.json')
     expected = {'gateway/'+n for n in GATEWAY_FILES}|CONSOLE_FILES|UPGRADE_FILES|{'gateway/gateway-manifest.json'}
-    if (value.get('kind')!='wind_relay_gateway_upgrade' or value.get('version')!='0.1.1'
+    if (value.get('kind')!='wind_relay_gateway_upgrade' or value.get('version')!='0.1.2'
             or set(value.get('files',{}))!=expected):
         raise UpgradeError('PACKAGE_INVALID')
     for name, hashed in value['files'].items():
@@ -221,7 +222,7 @@ def report(app):
 def finalize(app,build,output=None):
     value=report(app)
     gateway=value['gateway']
-    if (not gateway['runtime_verified'] or gateway.get('build_id')!=build or gateway.get('version')!='0.1.1'
+    if (not gateway['runtime_verified'] or gateway.get('build_id')!=build or gateway.get('version')!='0.1.2'
             or not gateway.get('maintenance_mode') or gateway.get('scheduler')!='client_round_robin'):
         raise UpgradeError('GATEWAY_VERIFICATION_FAILED')
     config,_,_=configuration(app)
@@ -232,7 +233,7 @@ def finalize(app,build,output=None):
     marker=safe_path(app/'.relay/gateway-maintenance.json')
     if read(marker).get('build_id')!=build:
         raise UpgradeError('MAINTENANCE_MARKER_MISMATCH')
-    value['upgrade']={'outcome':'verified_before_activation','target_version':'0.1.1','build_id':build}
+    value['upgrade']={'outcome':'verified_before_activation','target_version':'0.1.2','build_id':build}
     # Reports must be writable before admission is resumed. No rollback of the
     # DB is permitted once this marker is removed and new jobs can be accepted.
     write(app/'.relay/deployment-current.json',value)

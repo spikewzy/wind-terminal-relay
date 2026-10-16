@@ -21,11 +21,13 @@ import urllib.parse
 import urllib.request
 
 try:
-    from .diagnostics import VERSION, Recorder, bundle_name, safe_deployment, SEMVER
+    from .diagnostics import VERSION, Recorder, bundle_name, safe_deployment, safe_updates, SEMVER
     from .management import Management, ManagementError, access_key
+    from .updates import Updates, UpdateError, ACTIVE
 except ImportError:  # Running this portable file directly, outside a package.
-    from diagnostics import VERSION, Recorder, bundle_name, safe_deployment, SEMVER
+    from diagnostics import VERSION, Recorder, bundle_name, safe_deployment, safe_updates, SEMVER
     from management import Management, ManagementError, access_key
+    from updates import Updates, UpdateError, ACTIVE
 
 HERE = Path(__file__).resolve().parent
 IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
@@ -251,10 +253,13 @@ class Monitor:
         self.value = {"loading": True, "collected_at": time.time(), "diagnostics": {"version": VERSION}}
         self.management = None
         self.console_key = None
+        self.updates = None
         self.recorder = recorder if recorder is not None else Recorder()
 
     def run(self):
         while not self.stop.is_set():
+            if self.updates is not None:
+                self.updates.tick()
             try:
                 value = collect(self.config, self.client, self.port, self.recorder)
                 self.recorder.observe(value)
@@ -268,7 +273,9 @@ class Monitor:
 
     def export(self):
         with self.lock:
-            value = self.value
+            value = dict(self.value)
+        if self.updates is not None:
+            value['updates'] = safe_updates(self.updates.status())
         return self.recorder.bundle(value, HERE)
 
 
@@ -332,6 +339,12 @@ def make_server(monitor, port):
                 with monitor.lock:
                     data = dict(monitor.value)
                 self.respond(data)
+            elif self.path == "/api/updates":
+                try:
+                    self.respond(monitor.updates.status() if monitor.updates is not None else
+                                 {'source':'gitee','automatic_install':False,'unavailable':True})
+                except Exception as exc:
+                    self.management_error(exc)
             elif self.path == "/api/deployment-report":
                 with monitor.lock:
                     snapshot = dict(monitor.value)
@@ -339,6 +352,7 @@ def make_server(monitor, port):
                     "console_version":VERSION,"collected_at":snapshot.get("collected_at"),
                     "synthetic_fixture":snapshot.get("demonstration") is True,
                     "deployment":safe_deployment(snapshot.get("deployment")),
+                    "updates":safe_updates(monitor.updates.status()) if monitor.updates is not None else {},
                     "worker":{key:snapshot.get("worker",{}).get(key) for key in ("online","mode","age_seconds")},
                     "live_wind_query_performed":False}, filename="wind-relay-deployment.json")
             elif self.path == "/api/diagnostics":
@@ -364,7 +378,8 @@ def make_server(monitor, port):
             if not self.allowed_origin() or not self.authorized():
                 self.respond({"error": "CONSOLE_LOCKED"}, status=403)
                 return
-            if self.path not in {"/api/manage/add", "/api/manage/revoke", "/api/manage/verify-reload"}:
+            update_request = self.path in {'/api/updates/check', '/api/updates/install'}
+            if self.path not in {"/api/manage/add", "/api/manage/revoke", "/api/manage/verify-reload"} and not update_request:
                 self.respond({"error": "NOT_FOUND"}, status=404)
                 return
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
@@ -376,12 +391,28 @@ def make_server(monitor, port):
                     raise ValueError()
                 self.connection.settimeout(5)
                 body = json.loads(self.rfile.read(length))
-                if not isinstance(body, dict) or set(body) - {"client_id", "confirmation"}:
+                fields = {'gateway_version', 'confirmed'} if update_request else {'client_id', 'confirmation'}
+                if not isinstance(body, dict) or set(body) - fields:
                     raise ValueError()
             except (ValueError, TimeoutError, OSError):
                 self.respond({"error": "INVALID_REQUEST"}, status=400)
                 return
             try:
+                if update_request:
+                    if monitor.updates is None:
+                        raise UpdateError('UPDATE_UNAVAILABLE')
+                    if self.path.endswith('/check'):
+                        if body:
+                            raise UpdateError('INVALID_REQUEST', 400)
+                        monitor.updates.check()
+                        self.respond({'checking':True}, status=202)
+                    else:
+                        self.respond(monitor.updates.install(body.get('gateway_version'), body.get('confirmed')), status=202)
+                    return
+                if monitor.updates is not None:
+                    operation = monitor.updates.operation()
+                    if operation and operation['state'] in ACTIVE:
+                        raise UpdateError('UPDATE_ALREADY_RUNNING')
                 if self.path.endswith("verify-reload"):
                     result = monitor.management.verify_reload()
                 else:
@@ -443,6 +474,14 @@ def main():
         monitor.console_key = access_key(args.console_key)
         monitor.management = Management(args.config, args.client_config,
             lambda: dict(read_snapshot(database_path(args.config)), database_ok=True), recorder, args.gateway_port)
+        def update_guard():
+            monitor.management.idle()
+            if monitor.management.pending():
+                raise UpdateError('UPDATE_RELOAD_REQUIRED')
+        def update_current():
+            with monitor.lock:
+                return {'gateway_version':monitor.value.get('deployment',{}).get('gateway_version')}
+        monitor.updates = Updates(args.config.absolute().parent.parent, update_guard, update_current, recorder)
     except Exception as exc:
         recorder.record("management_unavailable", "management", "READ_ONLY_MODE", exc=exc)
     try:

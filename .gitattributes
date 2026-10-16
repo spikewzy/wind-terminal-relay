@@ -4,3 +4,4 @@
 *.md text eol=lf
 *.yml text eol=lf
 *.txt text eol=lf
+updates/packages/*.zip binary

@@ -217,7 +217,7 @@ class RoleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_version_and_policy_are_distinct_from_native_core_version(self):
         result = await self.a.request("GET", "/v1/status")
-        self.assertEqual(result["relay_version"], "0.1.1")
+        self.assertEqual(result["relay_version"], "0.1.2")
         self.assertEqual(result["mcp_version"], "0.24.2")
         self.assertEqual(result["queue_policy"]["client_pending_limit"], 5)
 

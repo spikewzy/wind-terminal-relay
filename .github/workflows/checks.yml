@@ -33,7 +33,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @('Update.ps1','monitor/Install.ps1','.github/windows-console-smoke.ps1','Upgrade-Gateway.ps1','.github/windows-gateway-upgrade-smoke.ps1')) {
+          foreach ($file in @('Update.ps1','monitor/Install.ps1','monitor/Launch-Upgrade.ps1','monitor/Run-OnlineUpgrade.ps1','.github/windows-console-smoke.ps1','Upgrade-Gateway.ps1','.github/windows-gateway-upgrade-smoke.ps1')) {
             $consoleTokens = $null
             $consoleParseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$consoleTokens, [ref]$consoleParseErrors) | Out-Null
@@ -45,6 +45,8 @@ jobs:
         run: python monitor/build_package.py
       - name: Build gateway upgrade bundle
         run: python gateway_update/build_package.py
+      - name: Verify mirrored Gitee update feed matches the source
+        run: python gateway_update/publish_feed.py --check
       - name: Install and upgrade console against a synthetic Windows deployment
         if: runner.os == 'Windows'
         shell: pwsh

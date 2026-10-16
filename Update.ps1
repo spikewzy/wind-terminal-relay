@@ -7,9 +7,10 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $sourceRoot = $PSScriptRoot
-$expectedVersion = '0.2.1'
+$expectedVersion = '0.3.0'
 $taskName = 'WindRelayMonitor'
-$reviewedFiles = @('monitor/monitor.py','monitor/diagnostics.py','monitor/management.py',
+$reviewedFiles = @('monitor/monitor.py','monitor/diagnostics.py','monitor/management.py','monitor/updates.py',
+    'monitor/Launch-Upgrade.ps1','monitor/Run-OnlineUpgrade.ps1',
     'monitor/index.html','monitor/Start.cmd','monitor/Install.ps1',
     'monitor/README.md','monitor/Export-Diagnostics.cmd','Update.cmd','Update.ps1','START-HERE.txt','LICENSE')
 function Assert-SafePath([string]$Path) {
@@ -134,9 +135,14 @@ try {
     }
     $authDirectory = Join-Path $monitorDirectory 'auth'
     Assert-SafePath $authDirectory
-    Protect-Directory $authDirectory $identity.User.Value
-    Protect-Directory (Join-Path $AppDirectory '.relay\console-backups')
     $keyFile = Join-Path $authDirectory 'console.key'
+    # Online updates run as SYSTEM. Keep the original desktop user's existing
+    # read permission instead of replacing it with SYSTEM's SID.
+    $preserveDesktopAccess = ($identity.User.Value -eq 'S-1-5-18' -and
+        (Test-Path -LiteralPath $authDirectory -PathType Container) -and
+        (Test-Path -LiteralPath $keyFile -PathType Leaf))
+    if (-not $preserveDesktopAccess) { Protect-Directory $authDirectory $identity.User.Value }
+    Protect-Directory (Join-Path $AppDirectory '.relay\console-backups')
     Assert-SafePath $keyFile
     if (-not (Test-Path -LiteralPath $keyFile)) {
         $bytes = New-Object byte[] 32
@@ -166,18 +172,20 @@ try {
         Start-Sleep -Seconds 1
     }
     if (-not $ready) { throw 'Console did not pass its local version check; restoring the previous console.' }
-    $desktop = [Environment]::GetFolderPath('Desktop')
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut((Join-Path $desktop 'WindRelay-Console.lnk'))
-    $pythonWindowless = Join-Path (Split-Path $PythonExe -Parent) 'pythonw.exe'
-    $shortcut.TargetPath = $(if (Test-Path -LiteralPath $pythonWindowless) { $pythonWindowless } else { $PythonExe })
-    $shortcut.Arguments = '"{0}" --open-console' -f $scriptFile
-    $shortcut.WorkingDirectory = $monitorDirectory
-    $shortcut.Save()
-    $diagnostic = $shell.CreateShortcut((Join-Path $desktop 'WindRelay-Diagnostics.lnk'))
-    $diagnostic.TargetPath = Join-Path $monitorDirectory 'Export-Diagnostics.cmd'
-    $diagnostic.WorkingDirectory = $monitorDirectory
-    $diagnostic.Save()
+    if ($identity.User.Value -ne 'S-1-5-18') {
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut((Join-Path $desktop 'WindRelay-Console.lnk'))
+        $pythonWindowless = Join-Path (Split-Path $PythonExe -Parent) 'pythonw.exe'
+        $shortcut.TargetPath = $(if (Test-Path -LiteralPath $pythonWindowless) { $pythonWindowless } else { $PythonExe })
+        $shortcut.Arguments = '"{0}" --open-console' -f $scriptFile
+        $shortcut.WorkingDirectory = $monitorDirectory
+        $shortcut.Save()
+        $diagnostic = $shell.CreateShortcut((Join-Path $desktop 'WindRelay-Diagnostics.lnk'))
+        $diagnostic.TargetPath = Join-Path $monitorDirectory 'Export-Diagnostics.cmd'
+        $diagnostic.WorkingDirectory = $monitorDirectory
+        $diagnostic.Save()
+    }
     Write-Host "Console $expectedVersion updated and local version check passed."
     Write-Host "Backup: $backupDirectory"
     Write-Host 'Gateway and worker were not restarted. Open WindRelay-Console on this desktop.'
