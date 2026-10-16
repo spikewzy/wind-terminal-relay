@@ -16,7 +16,7 @@ import time
 import traceback
 import zipfile
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 SEMVER = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
 FRAME_FILES = {"monitor.py", "diagnostics.py", "management.py", "updates.py", "request.py", "error.py", "threading.py",
@@ -67,7 +67,7 @@ def scalar(value):
 def safe_updates(value):
     if not isinstance(value, dict) or not value:
         return {}
-    clean = fields(value, {'source','checked_at','check_error','checking','automatic_install','check_interval_hours'})
+    clean = fields(value, {'source','checked_at','last_attempt_at','check_error','checking','automatic_install','check_interval_hours'})
     current = value.get('current',{})
     clean['current'] = {k:v for k,v in current.items() if k in {'gateway_version','console_version'}
                         and isinstance(v,str) and SEMVER.fullmatch(v)} if isinstance(current,dict) else {}
@@ -110,6 +110,12 @@ def error_details(exc):
         value = getattr(exc, name, None)
         if type(value) is int:
             result[name] = value
+    verify_code = getattr(cause if isinstance(cause, BaseException) else exc, 'verify_code', None)
+    if type(verify_code) is int:
+        result['verify_code'] = verify_code
+    http_status = getattr(exc, 'code', None)
+    if type(http_status) is int and 100 <= http_status <= 599:
+        result['http_status'] = http_status
     frames = []
     for frame in traceback.extract_tb(exc.__traceback__)[-8:]:
         filename = Path(frame.filename).name
@@ -120,7 +126,7 @@ def error_details(exc):
 
 
 def clean_error(value):
-    result = fields(value, {"exception_type", "cause_type", "errno", "winerror", "sqlite_errorcode"})
+    result = fields(value, {"exception_type", "cause_type", "errno", "winerror", "sqlite_errorcode", "verify_code", "http_status"})
     result["frames"] = [{"file": frame["file"], "function": scalar(frame.get("function")),
                           "line": scalar(frame.get("line"))}
                          for frame in value.get("frames", [])[:8]
@@ -235,7 +241,7 @@ class Recorder:
     def bundle(self, snapshot, source_dir):
         now = time.time()
         hashes = {}
-        for name in ("monitor.py", "diagnostics.py", "management.py", "updates.py", "Launch-Upgrade.ps1", "Run-OnlineUpgrade.ps1", "index.html", "Install.ps1"):
+        for name in ("monitor.py", "diagnostics.py", "management.py", "updates.py", "cacert.pem", "ca-provenance.json", "Launch-Upgrade.ps1", "Run-OnlineUpgrade.ps1", "index.html", "Install.ps1"):
             try:
                 hashes[name] = hashlib.sha256((Path(source_dir)/name).read_bytes()).hexdigest()
             except OSError:

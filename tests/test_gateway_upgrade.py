@@ -44,7 +44,7 @@ class UpgradeTests(unittest.TestCase):
     def tearDown(self):self.temp.cleanup()
 
     def test_package_and_read_only_inspection(self):
-        self.assertEqual(verify_package(self.package)['version'],'0.1.2')
+        self.assertEqual(verify_package(self.package)['version'],'0.1.3')
         self.assertIn('双击 Upgrade-Gateway.cmd',(self.package/'START-HERE.txt').read_text(encoding='utf-8'))
         before={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (self.app/'.relay').glob('*.json')}
         self.assertTrue(inspect(self.app,self.package)['idle'])
@@ -80,25 +80,25 @@ class UpgradeTests(unittest.TestCase):
 
     def test_report_unknown_worker_version_and_strict_no_secret_export(self):
         def fake(port,route,token=None):
-            if port==8766:return {'diagnostics':{'version':'0.3.0'},'token':'DONT_EXPORT_CONSOLE'}
-            return {'protocol_version':1,'worker_online':True,'worker_mode':'native','relay_version':'0.1.2',
+            if port==8766:return {'diagnostics':{'version':'0.3.1'},'token':'DONT_EXPORT_CONSOLE'}
+            return {'protocol_version':1,'worker_online':True,'worker_mode':'native','relay_version':'0.1.3',
                 'mcp_version':'0.24.2','server_sha256':'b'*64,'token':'DONT_EXPORT_TOKEN','hostname':'DONT_EXPORT_HOST',
                 'deployment':{'build_id':'a'*64,'scheduler':'client_round_robin','single_execution_lane':True},
                 'queue_policy':{'client_pending_limit':5,'global_queued_limit':100,'password':'DONT_EXPORT_POLICY'}}
         with patch('gateway_update.support.get_local',side_effect=fake):value=report(self.app)
-        self.assertEqual(value['gateway']['version'],'0.1.2')
+        self.assertEqual(value['gateway']['version'],'0.1.3')
         self.assertIsNone(value['worker']['version'])
         self.assertFalse(value['worker']['version_verified'])
         self.assertNotIn('DONT_EXPORT',json.dumps(value))
         self.assertNotIn('SYNTHETIC_',json.dumps(value))
-        cleaned=safe_snapshot({'deployment':{'gateway_version':'0.1.2','core_contract_version':'0.24.2','token':'DONT_EXPORT','queue_policy':{'client_pending_limit':5,'password':'DONT_EXPORT'}}})
-        self.assertEqual(cleaned['deployment']['gateway_version'],'0.1.2')
+        cleaned=safe_snapshot({'deployment':{'gateway_version':'0.1.3','core_contract_version':'0.24.2','token':'DONT_EXPORT','queue_policy':{'client_pending_limit':5,'password':'DONT_EXPORT'}}})
+        self.assertEqual(cleaned['deployment']['gateway_version'],'0.1.3')
         self.assertNotIn('DONT_EXPORT',json.dumps(cleaned))
 
     def test_activation_checks_policy_and_does_not_fail_into_rollback_after_commit(self):
         marker=self.app/'.relay/gateway-maintenance.json'
         marker.write_text(json.dumps({'build_id':'a'*64}))
-        value={'gateway':{'runtime_verified':True,'build_id':'a'*64,'version':'0.1.2',
+        value={'gateway':{'runtime_verified':True,'build_id':'a'*64,'version':'0.1.3',
             'maintenance_mode':True,'scheduler':'client_round_robin','queue_policy':{}},'worker':{}}
         with patch('gateway_update.support.report',return_value=value):
             with self.assertRaisesRegex(UpgradeError,'QUEUE_POLICY_VERIFICATION_FAILED'):
@@ -128,7 +128,7 @@ class MaintenanceTests(unittest.IsolatedAsyncioTestCase):
                 owner={'Authorization':'Bearer SYNTHETIC_OWNER'};worker={'Authorization':'Bearer SYNTHETIC_WORKER'}
                 response=await client.get('/v1/status',headers=owner)
                 self.assertTrue(response.json()['maintenance_mode'])
-                self.assertEqual(response.json()['relay_version'],'0.1.2')
+                self.assertEqual(response.json()['relay_version'],'0.1.3')
                 response=await client.post('/v1/jobs',headers=owner,json={'job_id':'2'*32,'tool':'wind_status','arguments':{'connect':False}})
                 self.assertEqual(response.status_code,503)
                 self.assertIsNone((await client.post('/v1/worker/claim',headers=worker,json={})).json()['job'])

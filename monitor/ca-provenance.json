@@ -1,0 +1,10 @@
+{
+  "provider": "certifi",
+  "version": "2026.7.22",
+  "upstream": "Mozilla CA Certificate Store",
+  "project": "https://github.com/certifi/python-certifi",
+  "distribution": "https://pypi.org/project/certifi/2026.7.22/",
+  "sha256": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+  "scope": "Public CA certificates, no private keys",
+  "license": "MPL-2.0; see CA-LICENSE.txt"
+}

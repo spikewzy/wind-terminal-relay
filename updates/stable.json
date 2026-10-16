@@ -3,15 +3,26 @@
   "channel": "stable",
   "releases": [
     {
+      "gateway_version": "0.1.3",
+      "console_version": "0.3.1",
+      "updater_protocol": 1,
+      "path": "updates/packages/wind-relay-gateway-upgrade-0.1.3.zip",
+      "sha256": "c95b160aeed4f67e8908e6961bc0ce22460159dab0aebb86e5254cad2471333b",
+      "bytes": 519198,
+      "build_id": "f3067a01d873cbe09fb95589a9f22d764b18f85b960d06a3e00b918ca101bfe6",
+      "published_on": "2026-10-16",
+      "notes": "修复 Windows 更新证书校验兼容性及左侧导航高亮；细分证书、DNS、超时错误并记录最近检查时间。保留现有接入文件。"
+    },
+    {
       "gateway_version": "0.1.2",
       "console_version": "0.3.0",
-      "updater_protocol": 1,
       "path": "updates/packages/wind-relay-gateway-upgrade-0.1.2.zip",
       "sha256": "dc87270fa671c14b4e7898bf21911fadb3063aed7fdcdf77a19be2ee21dc77ee",
-      "bytes": 269689,
       "build_id": "01a31f56b13a58f09653d0fe4bfef180c2ef7e04a68f1298392fdedd2e50c2cd",
+      "bytes": 269689,
       "published_on": "2026-10-16",
-      "notes": "Gitee 自动检查版本，手动选择并确认更新；保留接入文件与部署记录。"
+      "notes": "Gitee 自动检查版本，手动选择并确认更新；保留接入文件与部署记录。",
+      "updater_protocol": 1
     }
   ]
 }

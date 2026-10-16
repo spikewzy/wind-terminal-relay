@@ -29,6 +29,8 @@ jobs:
         run: python -m pip check
       - name: Offline tests without a Wind installation
         run: python -m unittest discover -s tests -v
+      - name: Public Gitee TLS evidence (network availability is not an offline-test dependency)
+        run: python .github/update-tls-probe.py
       - name: Parse Windows console scripts without running them
         if: runner.os == 'Windows'
         shell: pwsh

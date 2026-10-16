@@ -15,7 +15,7 @@ def payload(root=ROOT):
     root = Path(root)
     exact = [
         "README.md", "INSTALL.md", "LICENSE", "build_release.py", "Upgrade-Gateway.cmd", "Upgrade-Gateway.ps1", "Update.cmd", "Update.ps1", "START-HERE.txt",
-        ".gitignore", ".gitattributes", ".github/workflows/checks.yml", ".github/windows-console-smoke.ps1", ".github/windows-gateway-upgrade-smoke.ps1", ".github/online-update-fixture.py",
+        ".gitignore", ".gitattributes", ".github/workflows/checks.yml", ".github/windows-console-smoke.ps1", ".github/windows-gateway-upgrade-smoke.ps1", ".github/online-update-fixture.py", ".github/update-tls-probe.py",
         "requirements.in", "requirements-gateway.in", "requirements.lock.txt",
         "requirements-gateway.lock.txt", "references/relay-tool-contract.json",
         "relay_client.py", "relay_gateway.py", "relay_worker.py", "relay_setup.py",
@@ -25,7 +25,7 @@ def payload(root=ROOT):
     # root scripts which might contain private deployment configuration.
     if (root / "relay_admin.py").exists() or (root / "relay_admin.py").is_symlink():
         files.add(root / "relay_admin.py")
-    for name in ("monitor.py", "diagnostics.py", "management.py", "updates.py", "Launch-Upgrade.ps1", "Run-OnlineUpgrade.ps1", "index.html", "Start.cmd", "Install.ps1", "README.md", "build_package.py", "Export-Diagnostics.cmd"):
+    for name in ("monitor.py", "diagnostics.py", "management.py", "updates.py", "cacert.pem", "CA-LICENSE.txt", "ca-provenance.json", "Launch-Upgrade.ps1", "Run-OnlineUpgrade.ps1", "index.html", "Start.cmd", "Install.ps1", "README.md", "build_package.py", "Export-Diagnostics.cmd"):
         if (root / "monitor" / name).exists() or (root / "monitor" / name).is_symlink():
             files.add(root / "monitor" / name)
     files.update(root / "gateway_update" / name for name in ("support.py", "build_package.py", "publish_feed.py", "README.md"))

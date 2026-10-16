@@ -7,7 +7,7 @@ try:
     from .diagnostics import VERSION
 except ImportError:
     from diagnostics import VERSION
-FILES = ('monitor.py', 'diagnostics.py', 'management.py', 'updates.py', 'Launch-Upgrade.ps1', 'Run-OnlineUpgrade.ps1', 'index.html', 'Start.cmd', 'Install.ps1', 'README.md', 'Export-Diagnostics.cmd')
+FILES = ('monitor.py', 'diagnostics.py', 'management.py', 'updates.py', 'cacert.pem', 'CA-LICENSE.txt', 'ca-provenance.json', 'Launch-Upgrade.ps1', 'Run-OnlineUpgrade.ps1', 'index.html', 'Start.cmd', 'Install.ps1', 'README.md', 'Export-Diagnostics.cmd')
 ROOT_FILES = ('Update.cmd', 'Update.ps1', 'START-HERE.txt', 'LICENSE')
 
 

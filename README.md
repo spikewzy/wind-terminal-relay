@@ -20,13 +20,13 @@ flowchart LR
 
 ## 已部署旧网关：直接升级
 
-下载 **wind-relay-gateway-upgrade-0.1.2.zip**，解压到新文件夹，双击 **Upgrade-Gateway.cmd**。它检查空闲队列、备份数据库、切换新版网关，核对按设备轮转和限流后恢复接单，并同时更新管理台及导出部署报告。保留原接入 JSON、Windows 任务凭据和取数端；恢复接单前失败会尝试回退。具体步骤见 [现有部署升级](gateway_update/README.md)。
+下载 **wind-relay-gateway-upgrade-0.1.3.zip**，解压到新文件夹，双击 **Upgrade-Gateway.cmd**。它检查空闲队列、备份数据库、切换新版网关，核对按设备轮转和限流后恢复接单，并同时更新管理台及导出部署报告。保留原接入 JSON、Windows 任务凭据和取数端；恢复接单前失败会尝试回退。具体步骤见 [现有部署升级](gateway_update/README.md)。
 
 安装本版后，管理台的 **软件更新** 会在启动时及每 6 小时从 Gitee 检查版本。选择版本、点击“下载并更新所选版本”并确认后才安装。发布者只需把版本目录和 ZIP 一起提交 GitHub，再同步到 Gitee，无需单独维护 Gitee 发行附件。详见 [在线更新](docs/ONLINE_UPDATES.md)。
 
 ## 云电脑统一管理台
 
-已有网关可单独更新 [Wind 中继管理台](monitor/README.md)：监控运行状态、添加/撤销设备、下载接入文件、导出诊断包、从 Gitee 检查并手动选择升级。下载 `wind-relay-console-0.3.0.zip`，在云电脑解压到新文件夹，双击 `Update.cmd`。复用现有 Python，本次只安装管理台；以后在页面确认网关更新才会短暂重启网关。本地 MCP和信创执行端独立维护。旧后台未计量时仍显示未知，不推算官方额度。
+已有网关可单独更新 [Wind 中继管理台](monitor/README.md)：监控运行状态、添加/撤销设备、下载接入文件、导出诊断包、从 Gitee 检查并手动选择升级。下载 `wind-relay-console-0.3.1.zip`，在云电脑解压到新文件夹，双击 `Update.cmd`。复用现有 Python，本次只安装管理台；以后在页面确认网关更新才会短暂重启网关。本地 MCP和信创执行端独立维护。旧后台未计量时仍显示未知，不推算官方额度。
 
 ## 并发处理
 
@@ -54,7 +54,7 @@ flowchart LR
 
 详见 [INSTALL.md](INSTALL.md)、[设计与计量口径](docs/DESIGN.md)、[设备管理及用量监控](docs/MONITORING.md)、[滚动额度规则](docs/QUOTA.md)和[从旧试验版本迁移](docs/MIGRATION.md)。推荐 Python 3.12，当前依赖锁要求 Python 3.11 或更新版本。客户端和网关可安装到完全独立目录；执行端复用原核心环境，但中继源码也可以放在独立目录中。
 
-客户端提供原有 26 个工具，加 `relay_status`、`relay_usage`、`relay_job_status` 和 `relay_cancel_job`，合计 30 个工具。relay 本身版本为 0.1.2，管理台版本为 0.3.0，支持的核心版本独立记录在工具契约中，不能用 relay 版本推断 Wind 核心版本。
+客户端提供原有 26 个工具，加 `relay_status`、`relay_usage`、`relay_job_status` 和 `relay_cancel_job`，合计 30 个工具。relay 本身版本为 0.1.3，管理台版本为 0.3.1，支持的核心版本独立记录在工具契约中，不能用 relay 版本推断 Wind 核心版本。
 
 本地直连 MCP 的配置名称为 `wind_terminal_api`；远程调用的配置名称为 `wind_terminal_relay`。它们可以同时存在，任务应明确指定入口。真实结果的数据来源仍为 `wind_terminal_api`，调用通道为中继；不能为了区分通道而改写原始上游 `source`。模拟结果标记为 `relay_mock`。
 

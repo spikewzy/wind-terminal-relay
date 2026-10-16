@@ -7,11 +7,14 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
+import ssl
 import stat
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -35,6 +38,7 @@ OPERATION = re.compile(r'[a-f0-9]{32}\Z')
 ACTIVE = {'downloading', 'verifying', 'launching', 'installing'}
 STATES = ACTIVE | {'succeeded', 'failed', 'interrupted'}
 HERE = Path(__file__).absolute().parent
+CA_SHA256 = '9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f'
 
 
 class UpdateError(ManagementError):
@@ -88,12 +92,57 @@ class RepositoryRedirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def tls_context(bundle=None, expected_sha256=CA_SHA256, context_factory=ssl.create_default_context):
+    """Retain system trust and add the pinned public Mozilla/certifi CA set.
+
+    Windows SYSTEM can have a different/older default trust store than the
+    desktop browser. No Windows certificate store is modified, and chain,
+    hostname and the runtime's strict verification flags remain enabled.
+    """
+    try:
+        data = safe_path(HERE/'cacert.pem' if bundle is None else bundle).read_bytes()
+        if hashlib.sha256(data).hexdigest() != expected_sha256:
+            raise ValueError()
+        context = context_factory()
+        context.load_verify_locations(cadata=data.decode('ascii'))
+        if not context.check_hostname or context.verify_mode != ssl.CERT_REQUIRED:
+            raise ValueError()
+        return context
+    except (OSError, ValueError, UnicodeError):
+        raise UpdateError('UPDATE_CA_BUNDLE_INVALID', 500) from None
+
+
+def failure_code(exc, stage='check'):
+    if isinstance(exc, ManagementError):
+        return exc.code
+    cause = getattr(exc, 'reason', None)
+    if not isinstance(cause, BaseException):
+        cause = exc
+    if isinstance(cause, ssl.SSLCertVerificationError):
+        code = getattr(cause, 'verify_code', None)
+        return ('UPDATE_TLS_CERT_EXPIRED' if code == 10 else
+                'UPDATE_TLS_CERT_NOT_YET_VALID' if code == 9 else
+                'UPDATE_TLS_HOSTNAME_MISMATCH' if code in {62,64} else 'UPDATE_TLS_CERTIFICATE_ERROR')
+    if isinstance(cause, ssl.SSLError):
+        return 'UPDATE_TLS_HANDSHAKE_ERROR'
+    if isinstance(cause, socket.gaierror):
+        return 'UPDATE_DNS_ERROR'
+    if isinstance(cause, TimeoutError):
+        return 'UPDATE_TIMEOUT'
+    if isinstance(exc, urllib.error.HTTPError):
+        return ('UPDATE_FEED_NOT_FOUND' if exc.code == 404 and stage == 'check' else
+                'UPDATE_PACKAGE_NOT_FOUND' if exc.code == 404 else
+                'UPDATE_SOURCE_FORBIDDEN' if exc.code in {401,403} else
+                'UPDATE_RATE_LIMITED' if exc.code == 429 else 'UPDATE_HTTP_ERROR')
+    return 'UPDATE_SOURCE_UNAVAILABLE' if stage == 'check' else 'UPDATE_PREPARATION_FAILED'
+
+
 def fetch(url, maximum):
     if not trusted_url(url):
         raise UpdateError('UPDATE_SOURCE_DENIED', 400)
     request = urllib.request.Request(url, headers={
         'User-Agent': 'WindRelay-Update/' + VERSION, 'Cache-Control': 'no-cache'})
-    opener = urllib.request.build_opener(RepositoryRedirects())
+    opener = urllib.request.build_opener(RepositoryRedirects(), urllib.request.HTTPSHandler(context=tls_context()))
     with opener.open(request, timeout=20) as response:
         if not trusted_url(response.geturl()):
             raise UpdateError('UPDATE_SOURCE_DENIED', 502)
@@ -219,6 +268,7 @@ class Updates:
         self.lock = threading.RLock()
         self.releases = []
         self.checked_at = None
+        self.last_attempt_at = None
         self.check_error = None
         self.checking = False
         self.next_check = 0
@@ -229,6 +279,7 @@ class Updates:
             if self.checking:
                 return
             self.checking = True
+            self.last_attempt_at = time.time()
             self.next_check = time.time() + CHECK_INTERVAL
         def work():
             try:
@@ -238,7 +289,7 @@ class Updates:
                 self.recorder.record('update_checked', 'updates', 'UPDATE_CHECK_OK')
             except Exception as exc:
                 with self.lock:
-                    self.check_error = exc.code if isinstance(exc, UpdateError) else 'UPDATE_SOURCE_UNAVAILABLE'
+                    self.check_error = failure_code(exc)
                 self.recorder.record('update_check_failed', 'updates', self.check_error, exc=exc)
             finally:
                 with self.lock:
@@ -285,7 +336,7 @@ class Updates:
     def status(self):
         with self.lock:
             return {'source': 'gitee', 'check_interval_hours': 6, 'checking': self.checking,
-                'checked_at': self.checked_at, 'check_error': self.check_error,
+                'checked_at': self.checked_at, 'last_attempt_at': self.last_attempt_at, 'check_error': self.check_error,
                 'automatic_install': False, 'windows_supported': self.windows,
                 'current': dict(self.current(), console_version=VERSION),
                 'releases': [dict(r, eligible=self.eligible(r)) for r in self.releases],
@@ -338,6 +389,6 @@ class Updates:
             self._stage(value, 'installing')
             self.recorder.record('update_launched', 'updates', 'ONLINE_UPGRADE_STARTED')
         except Exception as exc:
-            code = exc.code if isinstance(exc, ManagementError) else 'UPDATE_PREPARATION_FAILED'
+            code = failure_code(exc, 'install')
             self._stage(value, 'failed', code)
             self.recorder.record('update_failed', 'updates', code, exc=exc)
