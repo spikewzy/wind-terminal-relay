@@ -19,7 +19,9 @@ con.executescript("PRAGMA journal_mode=WAL; CREATE TABLE jobs(id TEXT PRIMARY KE
 con.close()
 (p/'server.py').write_text('SYNTHETIC_CORE_FILE_KEEP_UNCHANGED')
 '@
-& $python -c $fixture $app
+$fixtureFile=Join-Path $root 'create-fixture.py'
+[IO.File]::WriteAllText($fixtureFile,$fixture,[Text.Encoding]::UTF8)
+& $python $fixtureFile $app
 if ($LASTEXITCODE) { throw 'Fixture failed.' }
 $legacy = @'
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
@@ -92,7 +94,9 @@ u=json.loads((p/'upgrade-manifest.json').read_text());u['build_id']=m['build_id'
 for name in u['files']:u['files'][name]=hashlib.sha256((p/name).read_bytes()).hexdigest()
 (p/'upgrade-manifest.json').write_text(json.dumps(u))
 '@
- & $python -c $breakPackage $badRoot
+ $breakFile=Join-Path $root 'break-package.py'
+ [IO.File]::WriteAllText($breakFile,$breakPackage,[Text.Encoding]::UTF8)
+ & $python $breakFile $badRoot
  if ($LASTEXITCODE) { throw 'Broken package fixture failed.' }
  $goodAction=(Get-ScheduledTask -TaskName 'WindRelayGateway').Actions[0].Arguments
  $failed=$false
@@ -108,7 +112,9 @@ assert con.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==3
 assert not con.execute("SELECT 1 FROM sqlite_master WHERE name='synthetic_failed_upgrade'").fetchone()
 con.close()
 '@
- & $python -c $verifyDatabase $app
+ $verifyFile=Join-Path $root 'verify-database.py'
+ [IO.File]::WriteAllText($verifyFile,$verifyDatabase,[Text.Encoding]::UTF8)
+ & $python $verifyFile $app
  if ($LASTEXITCODE) { throw 'Rollback lost tasks/dedupe or left a failed migration.' }
  if (Test-Path (Join-Path $app '.relay/gateway-maintenance.json')) { throw 'Own failed-upgrade marker not removed after verified rollback.' }
  Write-Host 'WINDOWS_GATEWAY_LEGACY_UPGRADE_ROTATION_REPORT_AND_ROLLBACK_OK; NO WIND WAS STARTED.'
