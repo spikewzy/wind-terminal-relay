@@ -16,7 +16,7 @@ import time
 import traceback
 import zipfile
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 SEMVER = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
 FRAME_FILES = {"monitor.py", "diagnostics.py", "management.py", "updates.py", "request.py", "error.py", "threading.py",

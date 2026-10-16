@@ -57,6 +57,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .github/windows-gateway-upgrade-smoke.ps1
+      - name: Upgrade an actual password-logon task without resupplying credentials
+        if: runner.os == 'Windows' && matrix.python == '3.13'
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .github/windows-gateway-upgrade-smoke.ps1 -PasswordLauncher
       - uses: actions/upload-artifact@v4
         with:
           name: wind-terminal-relay-${{ matrix.os }}-py${{ matrix.python }}

@@ -1,11 +1,12 @@
 # Isolated Windows CI only: synthetic old gateway, tasks, credentials and DB.
+param([switch]$PasswordLauncher)
 $ErrorActionPreference = 'Stop'
 $python = (Get-Command python).Source
 $root = Join-Path $env:RUNNER_TEMP ('gateway-upgrade-'+[guid]::NewGuid().ToString('N'))
 $app = Join-Path $root 'app'
 $package = Join-Path $root 'package'
 New-Item -ItemType Directory -Path (Join-Path $app '.relay'),(Join-Path $app 'references') -Force | Out-Null
-Expand-Archive -LiteralPath (Join-Path $PWD 'dist/wind-relay-gateway-upgrade-0.1.3.zip') -DestinationPath $package
+Expand-Archive -LiteralPath (Join-Path $PWD 'dist/wind-relay-gateway-upgrade-0.1.4.zip') -DestinationPath $package
 Copy-Item 'references/relay-tool-contract.json' (Join-Path $app 'references/relay-tool-contract.json')
 $fixture = @'
 import hashlib,json,pathlib,sqlite3,sys
@@ -35,10 +36,18 @@ ThreadingHTTPServer(('127.0.0.1',8765),H).serve_forever()
 '@
 [IO.File]::WriteAllText((Join-Path $app 'relay_gateway.py'),$legacy,[Text.Encoding]::UTF8)
 $oldAction=New-ScheduledTaskAction -Execute $python -Argument ('"'+(Join-Path $app 'relay_gateway.py')+'"') -WorkingDirectory $app
+$syntheticAccount = $null
+$launcherPath = Join-Path $app 'start_gateway.cmd'
+if ($PasswordLauncher) {
+ $legacyBatch = '@echo off'+"`r`n"+'"'+$python+'" "'+(Join-Path $app 'relay_gateway.py')+'"'+"`r`n"+'exit /b %errorlevel%'+"`r`n"
+ [IO.File]::WriteAllText($launcherPath,$legacyBatch,[Text.Encoding]::ASCII)
+ $oldAction=New-ScheduledTaskAction -Execute $launcherPath -WorkingDirectory $app
+ # Exact known 0.1.3 marker after the old launcher has been recovered; no DB restore.
+ [IO.File]::WriteAllText((Join-Path $app '.relay/gateway-maintenance.json'),'{"build_id":"f3067a01d873cbe09fb95589a9f22d764b18f85b960d06a3e00b918ca101bfe6"}',[Text.Encoding]::ASCII)
+}
 $trigger=New-ScheduledTaskTrigger -AtStartup
 $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount
 $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
-Register-ScheduledTask -TaskName 'WindRelayGateway' -Action $oldAction -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 $headers=@{Authorization='Bearer SYNTHETIC_OWNER'}
 $workerHeaders=@{Authorization='Bearer SYNTHETIC_WORKER'}
 $colleagueHeaders=@{Authorization='Bearer SYNTHETIC_COLLEAGUE'}
@@ -54,18 +63,47 @@ function Wait-Gateway {
  throw 'Synthetic gateway did not start.'
 }
 try {
+ if ($PasswordLauncher) {
+  $syntheticAccount='RelayCI'+[guid]::NewGuid().ToString('N').Substring(0,8)
+  $syntheticPassword='aA1!'+[guid]::NewGuid().ToString('N')
+  $securePassword=ConvertTo-SecureString $syntheticPassword -AsPlainText -Force
+  New-LocalUser -Name $syntheticAccount -Password $securePassword -PasswordNeverExpires | Out-Null
+  $administrators=(Get-LocalGroup -SID 'S-1-5-32-544').Name
+  Add-LocalGroupMember -Group $administrators -Member $syntheticAccount
+  Register-ScheduledTask -TaskName 'WindRelayGateway' -Action $oldAction -Trigger $trigger -User ($env:COMPUTERNAME+'\'+$syntheticAccount) -Password $syntheticPassword -RunLevel Highest -Settings $settings | Out-Null
+  $syntheticPassword=$null;$securePassword=$null
+  if ([string](Get-ScheduledTask -TaskName 'WindRelayGateway').Principal.LogonType -ne 'Password') { throw 'Password-logon fixture was not actually registered.' }
+ } else {
+  Register-ScheduledTask -TaskName 'WindRelayGateway' -Action $oldAction -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
+ }
  Start-ScheduledTask -TaskName 'WindRelayGateway'
  $before=Wait-Gateway
  & $updater -AppDirectory $app -PythonExe $python -CheckOnly
  if (Test-Path (Join-Path $app '.gateway-releases')) { throw 'CheckOnly wrote files.' }
+ if (-not $PasswordLauncher) {
+  # A rejected action update must restart the unchanged original task and keep
+  # the first failure visible; it must not try the same forbidden action again.
+  function Set-ScheduledTask { throw 'SYNTHETIC_TASK_REGISTRATION_DENIED' }
+  $denied=$false
+  try { & $updater -AppDirectory $app -PythonExe $python -SkipConsole -NoOpen } catch { $denied=$_.Exception.Message -like '*SYNTHETIC_TASK_REGISTRATION_DENIED*' }
+  finally { Remove-Item Function:\Set-ScheduledTask }
+  if (-not $denied) { throw 'The original task-registration failure was hidden.' }
+  $stillOld=Wait-Gateway
+  if ($stillOld.relay_version -or (Test-Path (Join-Path $app '.relay/gateway-maintenance.json'))) { throw 'Unchanged original task was not restored after rejected registration.' }
+ }
  & $updater -AppDirectory $app -PythonExe $python -NoOpen
  $after=Wait-Gateway
- if ($after.relay_version -ne '0.1.3' -or $after.deployment.scheduler -ne 'client_round_robin' -or $after.maintenance_mode -or $after.queue_policy.client_pending_limit -ne 5) { throw 'Runtime upgrade not verified.' }
+ if ($PasswordLauncher) {
+  $taskAfter=Get-ScheduledTask -TaskName 'WindRelayGateway'
+  if ($taskAfter.Actions[0].Execute -ne $launcherPath -or $taskAfter.Actions[0].Arguments -or [string]$taskAfter.Principal.LogonType -ne 'Password' -or $taskAfter.Principal.UserId -notlike ('*\'+$syntheticAccount)) { throw 'Password task identity/action changed.' }
+  if (@(Get-ChildItem -LiteralPath (Join-Path $app '.relay/archive') -Filter 'gateway-maintenance-0.1.3-*.json').Count -ne 1) { throw 'Known legacy marker was not preserved.' }
+ }
+ if ($after.relay_version -ne '0.1.4' -or $after.deployment.scheduler -ne 'client_round_robin' -or $after.maintenance_mode -or $after.queue_policy.client_pending_limit -ne 5) { throw 'Runtime upgrade not verified.' }
  if ((Get-FileHash (Join-Path $app '.relay/gateway.json')).Hash -ne $configHash -or (Get-FileHash (Join-Path $app '.relay/client-owner.json')).Hash -ne $ownerHash -or (Get-FileHash (Join-Path $app 'server.py')).Hash -ne $coreHash) { throw 'Credentials or core changed.' }
  $report=Get-Content -Raw (Join-Path $app '.relay/deployment-current.json') | ConvertFrom-Json
- if ($report.upgrade.outcome -ne 'activated' -or $report.gateway.version -ne '0.1.3' -or $report.worker.version_verified) { throw 'Deployment report invalid.' }
+ if ($report.upgrade.outcome -ne 'activated' -or $report.gateway.version -ne '0.1.4' -or $report.worker.version_verified) { throw 'Deployment report invalid.' }
  $consoleReport=Invoke-RestMethod 'http://127.0.0.1:8766/api/deployment-report'
- if ($consoleReport.console_version -ne '0.3.1' -or $consoleReport.deployment.gateway_version -ne '0.1.3') { throw 'Console deployment report invalid.' }
+ if ($consoleReport.console_version -ne '0.3.2' -or $consoleReport.deployment.gateway_version -ne '0.1.4') { throw 'Console deployment report invalid.' }
  # Prove actual rotation with HTTP jobs and synthetic completions. No Wind SDK.
  foreach ($entry in @(@('2',$headers),@('3',$headers),@('4',$colleagueHeaders))) {
   $body=@{job_id=($entry[0]*32);tool='wind_status';arguments=@{connect=$false}} | ConvertTo-Json -Depth 4 -Compress
@@ -99,11 +137,13 @@ for name in u['files']:u['files'][name]=hashlib.sha256((p/name).read_bytes()).he
  & $python $breakFile $badRoot
  if ($LASTEXITCODE) { throw 'Broken package fixture failed.' }
  $goodAction=(Get-ScheduledTask -TaskName 'WindRelayGateway').Actions[0].Arguments
+ $goodLauncherHash=if ($PasswordLauncher) {(Get-FileHash -LiteralPath $launcherPath).Hash} else {''}
  $failed=$false
  try { & (Join-Path $badRoot 'Upgrade-Gateway.ps1') -AppDirectory $app -PythonExe $python -SkipConsole -NoOpen } catch { $failed=$true }
  if (-not $failed) { throw 'Broken gateway upgrade unexpectedly activated.' }
  $recovered=Wait-Gateway
  if ($recovered.deployment.build_id -ne $after.deployment.build_id -or (Get-ScheduledTask -TaskName 'WindRelayGateway').Actions[0].Arguments -ne $goodAction) { throw 'Old task not restored.' }
+ if ($PasswordLauncher -and (Get-FileHash -LiteralPath $launcherPath).Hash -ne $goodLauncherHash) { throw 'Stable launcher bytes were not restored.' }
  $verifyDatabase=@'
 import pathlib,sqlite3,sys
 con=sqlite3.connect(pathlib.Path(sys.argv[1])/'.relay/queue.sqlite')
@@ -128,7 +168,7 @@ con.close()
  }
  $fixtureConsole=Join-Path $PWD '.github/online-update-fixture.py'
  $originalConsole=Join-Path $app 'monitor/monitor.py'
- $zip=Join-Path $PWD 'dist/wind-relay-gateway-upgrade-0.1.3.zip'
+ $zip=Join-Path $PWD 'dist/wind-relay-gateway-upgrade-0.1.4.zip'
  $fixtureAction=New-ScheduledTaskAction -Execute $python -Argument ('"{0}" "{1}" "{2}" "{3}"' -f $fixtureConsole,$originalConsole,$app,$zip) -WorkingDirectory (Join-Path $app 'monitor')
  Set-ScheduledTask -TaskName 'WindRelayMonitor' -Action $fixtureAction | Out-Null
  Start-ScheduledTask -TaskName 'WindRelayMonitor'
@@ -146,7 +186,7 @@ con.close()
  $consoleKey=(Get-Content -Raw (Join-Path $app 'monitor/auth/console.key')).Trim()
  $desktopAccessBefore=(Get-Acl -LiteralPath (Join-Path $app 'monitor/auth')).Sddl
  $consoleHeaders=@{'X-Console-Token'=$consoleKey}
- $requested=Invoke-RestMethod 'http://127.0.0.1:8766/api/updates/install' -Method Post -Headers $consoleHeaders -ContentType 'application/json' -Body '{"gateway_version":"0.1.3","confirmed":true}'
+ $requested=Invoke-RestMethod 'http://127.0.0.1:8766/api/updates/install' -Method Post -Headers $consoleHeaders -ContentType 'application/json' -Body '{"gateway_version":"0.1.4","confirmed":true}'
  if (-not $requested.operation_id) { throw 'No durable update operation.' }
  $onlineCompleted=$false
  for ($attempt=0;$attempt -lt 90;$attempt++) {
@@ -165,13 +205,18 @@ con.close()
   throw 'Independent online upgrade task did not finish across console restart.'
  }
  $current=Invoke-RestMethod 'http://127.0.0.1:8766/api/status'
- if ($current.demonstration -or $current.diagnostics.version -ne '0.3.1' -or $current.deployment.gateway_version -ne '0.1.3') { throw 'New real console/runtime versions were not verified.' }
+ if ($current.demonstration -or $current.diagnostics.version -ne '0.3.2' -or $current.deployment.gateway_version -ne '0.1.4') { throw 'New real console/runtime versions were not verified.' }
  if ((Get-FileHash (Join-Path $app '.relay/gateway.json')).Hash -ne $configHash -or (Get-FileHash (Join-Path $app '.relay/client-owner.json')).Hash -ne $ownerHash -or (Get-Content -Raw (Join-Path $app 'monitor/auth/console.key')).Trim() -ne $consoleKey) { throw 'Online update changed credentials.' }
  if ((Get-Acl -LiteralPath (Join-Path $app 'monitor/auth')).Sddl -ne $desktopAccessBefore) { throw 'SYSTEM update changed the desktop user access rules.' }
  Write-Host 'WINDOWS_MANUAL_ONLINE_UPDATE_SURVIVED_CONSOLE_RESTART_OK; SYNTHETIC MIRROR, NO WIND.'
+ if ($PasswordLauncher) { Write-Host 'WINDOWS_PASSWORD_TASK_LAUNCHER_UPGRADE_ROLLBACK_AND_ONLINE_UPDATE_OK; NO PASSWORD WAS PASSED TO THE UPDATER.' }
 } finally {
  foreach ($task in @('WindRelayUpgrade','WindRelayGateway','WindRelayMonitor')) {
   Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+ }
+ if ($syntheticAccount) {
+  Remove-LocalGroupMember -Group $administrators -Member $syntheticAccount -ErrorAction SilentlyContinue
+  Remove-LocalUser -Name $syntheticAccount -ErrorAction SilentlyContinue
  }
 }

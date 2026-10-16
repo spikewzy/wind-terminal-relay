@@ -69,9 +69,23 @@ foreach ($name in @('start_gateway.cmd','start-gateway.cmd','relay_gateway.py'))
 }
 if ($oldCommand.IndexOf((Join-Path $AppDirectory '.gateway-releases\'),[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $oldCommand.Contains('relay_gateway.py')) { $recognized = $true }
 if (-not $recognized) { throw 'GATEWAY_TASK_POINTS_TO_UNRECOGNIZED_PROGRAM' }
+$launcherPath = ''
+foreach ($name in @('start_gateway.cmd','start-gateway.cmd')) {
+    if ([string]::Equals([string]$oldAction.Execute,(Join-Path $AppDirectory $name),[StringComparison]::OrdinalIgnoreCase) -and -not $oldAction.Arguments) {
+        $launcherPath = Join-Path $AppDirectory $name
+    }
+}
+if ($launcherPath) {
+    Assert-Safe $launcherPath
+    if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) { throw 'EXISTING_LAUNCHER_NOT_FOUND' }
+    Write-Host 'Keeping the existing scheduled task and its stored credentials; switching only its launcher file.'
+} elseif ([string]$oldTask.Principal.LogonType -in @('Password','InteractiveOrPassword','1','6')) {
+    # Updating a password-logon task requires resupplying Windows credentials.
+    # Never discover that after stopping the working gateway or change its identity.
+    throw 'PASSWORD_TASK_NEEDS_STABLE_LAUNCHER: no service was stopped; retain the task and use a stable start_gateway.cmd launcher.'
+}
 $marker = Join-Path $AppDirectory '.relay\gateway-maintenance.json'
 Assert-Safe $marker
-if (Test-Path -LiteralPath $marker) { throw 'PRIOR_UPGRADE_REQUIRES_INSPECTION: maintenance marker retained.' }
 $version = $package.version
 $build = $package.build_id
 $release = Join-Path $AppDirectory ('.gateway-releases\'+$version+'-'+$build.Substring(0,12))
@@ -108,6 +122,26 @@ $backup = Join-Path $AppDirectory ('.gateway-backups\'+$operation)
 Protect-Directory $backup
 $oldXml = Export-ScheduledTask -TaskName $taskName
 $oldXml | Set-Content -LiteralPath (Join-Path $backup 'task.xml') -Encoding UTF8
+$launcherBackup = Join-Path $backup 'launcher.cmd'
+$oldLauncherHash = ''
+if ($launcherPath) {
+    $oldLauncherHash = (Get-FileHash -LiteralPath $launcherPath).Hash
+    Copy-Item -LiteralPath $launcherPath -Destination $launcherBackup
+}
+function Replace-Launcher([byte[]]$Bytes) {
+    $temporary = $launcherPath+'.relay-'+[guid]::NewGuid().ToString('N')+'.tmp'
+    Assert-Safe $temporary
+    try {
+        [IO.File]::WriteAllBytes($temporary,$Bytes)
+        [IO.File]::Replace($temporary,$launcherPath,$null)
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
+}
+function Same-Action($Left,$Right) {
+    return ([string]$Left.Execute -ceq [string]$Right.Execute -and [string]$Left.Arguments -ceq [string]$Right.Arguments -and [string]$Left.WorkingDirectory -ceq [string]$Right.WorkingDirectory)
+}
+function Quote-Literal([string]$Value) { return "'"+$Value.Replace("'","''")+"'" }
 $reportFile = Join-Path ([Environment]::GetFolderPath('UserProfile')) ('Downloads\wind-relay-deployment-'+$operation+'.json')
 Assert-Safe $reportFile
 New-Item -ItemType Directory -Path (Split-Path $reportFile -Parent) -Force | Out-Null
@@ -123,6 +157,8 @@ $wasRunning = $oldTask.State -eq 'Running'
 $stopped = $false
 $backupReady = $false
 $switched = $false
+$switchAttempted = $false
+$newLauncherHash = ''
 $activated = $false
 function Stop-Gateway {
     Disable-ScheduledTask -TaskName $taskName | Out-Null
@@ -138,6 +174,13 @@ try {
     $configHash = (Get-FileHash -LiteralPath $configFile).Hash
     $ownerHash = (Get-FileHash -LiteralPath $ownerFile).Hash
     $checked = Invoke-Helper 'inspect'
+    if (Test-Path -LiteralPath $marker) {
+        if (-not $launcherPath) { throw 'PRIOR_UPGRADE_REQUIRES_INSPECTION: maintenance marker retained.' }
+        # Only the known 0.1.3 failure, with a running unversioned gateway and
+        # an idle DB, may be archived. No database rollback or task change here.
+        $recovery = Invoke-Helper 'recover-marker' @('--launcher',$launcherPath)
+        Write-Host ('Prior 0.1.3 marker preserved in archive: '+$recovery.archive_name)
+    }
     $before = Invoke-Helper 'report'
     $before | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $backup 'before.json') -Encoding UTF8
     Write-Host 'Pausing the gateway briefly. Wind and the physical execution worker stay running.'
@@ -150,10 +193,23 @@ try {
     [IO.File]::WriteAllText($marker,('{"build_id":"'+$build+'"}'),[Text.Encoding]::ASCII)
     $arguments = '"{0}" --config "{1}" --maintenance-file "{2}"' -f (Join-Path $release 'relay_gateway.py'),$configFile,$marker
     $action = New-ScheduledTaskAction -Execute $newPython -Argument $arguments -WorkingDirectory $release
-    # Set only Actions; retain the original task identity, stored password,
-    # triggers and settings so rollback never asks for an administrator password.
+    if ($launcherPath) {
+        if ((Get-FileHash -LiteralPath $launcherPath).Hash -ne $oldLauncherHash) { throw 'EXISTING_LAUNCHER_CHANGED' }
+        $command = 'Set-Location -LiteralPath '+(Quote-Literal $release)+'; & '+(Quote-Literal $newPython)+' '+(Quote-Literal (Join-Path $release 'relay_gateway.py'))+' --config '+(Quote-Literal $configFile)+' --maintenance-file '+(Quote-Literal $marker)+'; exit $LASTEXITCODE'
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        $batch = '@echo off'+"`r`n"+'@rem WindRelay stable gateway launcher; scheduled task credentials retained.'+"`r`n"+'"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -EncodedCommand '+$encoded+"`r`n"+'exit /b %errorlevel%'+"`r`n"
+        $launcherBytes = [Text.Encoding]::ASCII.GetBytes($batch)
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        try { $newLauncherHash = ([BitConverter]::ToString($hasher.ComputeHash($launcherBytes))).Replace('-','') } finally { $hasher.Dispose() }
+        $switchAttempted = $true
+        Replace-Launcher $launcherBytes
+    } else {
+        # Only non-password tasks reach this path; password tasks above retain
+        # their existing action and use an atomic launcher-file replacement.
+        $switchAttempted = $true
+        Set-ScheduledTask -TaskName $taskName -Action $action | Out-Null
+    }
     $switched = $true
-    Set-ScheduledTask -TaskName $taskName -Action $action | Out-Null
     Enable-ScheduledTask -TaskName $taskName | Out-Null
     Start-ScheduledTask -TaskName $taskName
     $healthy = $false
@@ -173,23 +229,49 @@ try {
     Write-Host "Deployment report: $reportFile"
 } catch {
     $failure = $_
+    Write-Warning ('Original upgrade failure: '+$failure.Exception.Message)
+    if (-not $stopped) { throw $failure }
     # Once maintenance is removed, clients may already have submitted new jobs.
     # Never replace the DB after that point, even if a report/window step failed.
     if ($switched -and -not (Test-Path -LiteralPath $marker)) {
         Write-Warning 'Activation may already have completed. Database was NOT rolled back. Inspect deployment report/status.'
         throw $failure
     }
-    if ($switched) {
-        Stop-Gateway
-        if ($backupReady) { $restored = Invoke-Helper 'restore' @('--directory',$backup) }
-        Set-ScheduledTask -TaskName $taskName -Action $oldTask.Actions | Out-Null
+    try {
+        if ($switchAttempted) {
+            Stop-Gateway
+            if ($switched -and $backupReady) { $restored = Invoke-Helper 'restore' @('--directory',$backup) }
+            if ($launcherPath) {
+                $currentLauncherHash = (Get-FileHash -LiteralPath $launcherPath).Hash
+                if ($currentLauncherHash -eq $newLauncherHash) {
+                    Replace-Launcher ([IO.File]::ReadAllBytes($launcherBackup))
+                } elseif ($currentLauncherHash -ne $oldLauncherHash) { throw 'LAUNCHER_RECOVERY_CONFLICT' }
+            } elseif (-not (Same-Action (Get-ScheduledTask -TaskName $taskName).Actions[0] $oldAction)) {
+                Set-ScheduledTask -TaskName $taskName -Action $oldTask.Actions | Out-Null
+            }
+        }
+        if ($backupReady -and (Test-Path -LiteralPath $marker)) {
+            $failedMarker = Get-Content -Raw -LiteralPath $marker | ConvertFrom-Json
+            if ($failedMarker.build_id -ne $build) { throw 'MAINTENANCE_MARKER_MISMATCH' }
+            Move-Item -LiteralPath $marker -Destination (Join-Path $backup 'failed-maintenance.json') -ErrorAction Stop
+        }
+        if ($stopped) {
+            Enable-ScheduledTask -TaskName $taskName | Out-Null
+            if ($wasRunning) { Start-ScheduledTask -TaskName $taskName }
+        }
+        $restoredVerified = -not $wasRunning
+        if ($wasRunning) {
+            for ($attempt=0; $attempt -lt 15; $attempt++) {
+                $restoredReport = Invoke-Helper 'report'
+                if ($restoredReport.gateway.runtime_verified -and $restoredReport.gateway.version -eq $before.gateway.version -and $restoredReport.gateway.build_id -eq $before.gateway.build_id -and -not $restoredReport.gateway.maintenance_mode) { $restoredVerified=$true; break }
+                Start-Sleep -Seconds 1
+            }
+        }
+        if (-not $restoredVerified) { throw 'OLD_GATEWAY_RECOVERY_NOT_VERIFIED' }
+        Write-Host 'Old gateway restored and checked; existing jobs and credentials retained. Keep the original error and backup folder.'
+    } catch {
+        Write-Warning ('Recovery also needs inspection: '+$_.Exception.Message+'. Original failure was printed above; all recovery files are retained.')
     }
-    if ($stopped) {
-        Enable-ScheduledTask -TaskName $taskName | Out-Null
-        if ($wasRunning) { Start-ScheduledTask -TaskName $taskName }
-    }
-    if ($backupReady -and (Test-Path -LiteralPath $marker)) { Remove-Item -LiteralPath $marker -Force }
-    Write-Host 'Old gateway task restored; existing jobs and credentials retained. Keep the error and backup folder.'
     throw $failure
 } finally {
     $lock.Unlock(0,1)

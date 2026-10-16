@@ -2,9 +2,9 @@
 
 ## 先安装一次带更新入口的管理台
 
-已有旧部署：把 `wind-relay-gateway-upgrade-0.1.3.zip` 传到云电脑，解压到新文件夹，双击 **Upgrade-Gateway.cmd**。先让同事暂停新任务；Wind、信创服务、Tailscale 保持运行。网关与管理台会短暂重启，原 JSON 接入文件继续有效。
+已有旧部署：把 `wind-relay-gateway-upgrade-0.1.4.zip` 传到云电脑，解压到新文件夹，双击 **Upgrade-Gateway.cmd**。先让同事暂停新任务；Wind、信创服务、Tailscale 保持运行。网关与管理台会短暂重启，原 JSON 接入文件继续有效。
 
-如果这次只想安装管理台，也可解压 `wind-relay-console-0.3.1.zip`，双击 **Update.cmd**；此操作不升级网关。之后可以在页面中选择网关升级。
+如果这次只想安装管理台，也可解压 `wind-relay-console-0.3.2.zip`，双击 **Update.cmd**；此操作不升级网关。之后可以在页面中选择网关升级。
 
 云电脑访问不了 GitHub，可以从别的电脑下载后传过去。只有这次需要手动放入安装包；旧管理台没有在线更新入口，无法靠检查按钮安装自己尚不具备的功能。
 
@@ -35,7 +35,7 @@ Gitee 不通或尚未同步：页面提示失败，原服务继续运行。不�
 
 ### Windows 证书校验失败
 
-管理台 0.3.1 在保留系统证书库的同时，加载随软件发布的 Mozilla/certifi 公共 CA 证书包，以改善云电脑后台 Python 信任库不完整的问题。证书包来源、版本和 SHA256 记录在 `monitor/ca-provenance.json`，许可在 `monitor/CA-LICENSE.txt`。不会向 Windows 根证书库写入证书；HTTPS 仍校验证书链、域名、有效期，并保留 Python 默认的严格校验。
+管理台 0.3.2 在保留系统证书库的同时，加载随软件发布的 Mozilla/certifi 公共 CA 证书包，以改善云电脑后台 Python 信任库不完整的问题。证书包来源、版本和 SHA256 记录在 `monitor/ca-provenance.json`，许可在 `monitor/CA-LICENSE.txt`。不会向 Windows 根证书库写入证书；HTTPS 仍校验证书链、域名、有效期，并保留 Python 默认的严格校验。
 
 已确认的 `SSLCertVerificationError` 只能证明校验失败，旧诊断没有保留具体校验码，不能仅据此断定缺哪个根证书。若补充标准证书后仍失败，新版会显示证书、时钟、域名、DNS、超时或 HTTP 的对应错误，并在诊断包保留校验码，方便继续排查企业代理、时间或证书链。
 

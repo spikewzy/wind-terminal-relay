@@ -11,7 +11,7 @@ from unittest.mock import patch
 import zipfile
 import httpx
 from gateway_update.build_package import build
-from gateway_update.support import verify_package, inspect, backup, restore, report, finalize, UpgradeError
+from gateway_update.support import verify_package, inspect, backup, restore, report, finalize, recover_marker, LEGACY_013_BUILD, UpgradeError
 from monitor.diagnostics import safe_snapshot
 from wind_relay.common import digest, load_contract
 from wind_relay.gateway import create_app
@@ -44,7 +44,7 @@ class UpgradeTests(unittest.TestCase):
     def tearDown(self):self.temp.cleanup()
 
     def test_package_and_read_only_inspection(self):
-        self.assertEqual(verify_package(self.package)['version'],'0.1.3')
+        self.assertEqual(verify_package(self.package)['version'],'0.1.4')
         self.assertIn('双击 Upgrade-Gateway.cmd',(self.package/'START-HERE.txt').read_text(encoding='utf-8'))
         before={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (self.app/'.relay').glob('*.json')}
         self.assertTrue(inspect(self.app,self.package)['idle'])
@@ -80,25 +80,25 @@ class UpgradeTests(unittest.TestCase):
 
     def test_report_unknown_worker_version_and_strict_no_secret_export(self):
         def fake(port,route,token=None):
-            if port==8766:return {'diagnostics':{'version':'0.3.1'},'token':'DONT_EXPORT_CONSOLE'}
-            return {'protocol_version':1,'worker_online':True,'worker_mode':'native','relay_version':'0.1.3',
+            if port==8766:return {'diagnostics':{'version':'0.3.2'},'token':'DONT_EXPORT_CONSOLE'}
+            return {'protocol_version':1,'worker_online':True,'worker_mode':'native','relay_version':'0.1.4',
                 'mcp_version':'0.24.2','server_sha256':'b'*64,'token':'DONT_EXPORT_TOKEN','hostname':'DONT_EXPORT_HOST',
                 'deployment':{'build_id':'a'*64,'scheduler':'client_round_robin','single_execution_lane':True},
                 'queue_policy':{'client_pending_limit':5,'global_queued_limit':100,'password':'DONT_EXPORT_POLICY'}}
         with patch('gateway_update.support.get_local',side_effect=fake):value=report(self.app)
-        self.assertEqual(value['gateway']['version'],'0.1.3')
+        self.assertEqual(value['gateway']['version'],'0.1.4')
         self.assertIsNone(value['worker']['version'])
         self.assertFalse(value['worker']['version_verified'])
         self.assertNotIn('DONT_EXPORT',json.dumps(value))
         self.assertNotIn('SYNTHETIC_',json.dumps(value))
-        cleaned=safe_snapshot({'deployment':{'gateway_version':'0.1.3','core_contract_version':'0.24.2','token':'DONT_EXPORT','queue_policy':{'client_pending_limit':5,'password':'DONT_EXPORT'}}})
-        self.assertEqual(cleaned['deployment']['gateway_version'],'0.1.3')
+        cleaned=safe_snapshot({'deployment':{'gateway_version':'0.1.4','core_contract_version':'0.24.2','token':'DONT_EXPORT','queue_policy':{'client_pending_limit':5,'password':'DONT_EXPORT'}}})
+        self.assertEqual(cleaned['deployment']['gateway_version'],'0.1.4')
         self.assertNotIn('DONT_EXPORT',json.dumps(cleaned))
 
     def test_activation_checks_policy_and_does_not_fail_into_rollback_after_commit(self):
         marker=self.app/'.relay/gateway-maintenance.json'
         marker.write_text(json.dumps({'build_id':'a'*64}))
-        value={'gateway':{'runtime_verified':True,'build_id':'a'*64,'version':'0.1.3',
+        value={'gateway':{'runtime_verified':True,'build_id':'a'*64,'version':'0.1.4',
             'maintenance_mode':True,'scheduler':'client_round_robin','queue_policy':{}},'worker':{}}
         with patch('gateway_update.support.report',return_value=value):
             with self.assertRaisesRegex(UpgradeError,'QUEUE_POLICY_VERIFICATION_FAILED'):
@@ -117,6 +117,48 @@ class UpgradeTests(unittest.TestCase):
             self.assertFalse(result['deployment_record_saved'])
             self.assertFalse(marker.exists())
 
+    def legacy_marker(self,build=LEGACY_013_BUILD):
+        launcher=self.app/'start_gateway.cmd'
+        launcher.write_bytes(b'@echo off\r\npython relay_gateway.py\r\n')
+        marker=self.app/'.relay/gateway-maintenance.json'
+        marker.write_text(json.dumps({'build_id':build}))
+        return launcher,marker
+
+    def test_known_013_marker_is_archived_without_restoring_or_replaying_database(self):
+        launcher,marker=self.legacy_marker();original=marker.read_bytes()
+        snapshot={'gateway':{'runtime_verified':True,'version':None,'maintenance_mode':False}}
+        before=self.db.read_bytes()
+        with patch('gateway_update.support.report',return_value=snapshot),patch('gateway_update.support.bounded_backup') as restore_db:
+            result=recover_marker(self.app,launcher)
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.app/'.relay/archive'/result['archive_name']).read_bytes(),original)
+        self.assertFalse(result['database_restored']);restore_db.assert_not_called()
+        self.assertEqual(self.db.read_bytes(),before)
+
+    def test_unknown_or_active_marker_and_unknown_launcher_are_retained(self):
+        launcher,marker=self.legacy_marker('a'*64)
+        with self.assertRaisesRegex(UpgradeError,'PRIOR_UPGRADE'):recover_marker(self.app,launcher)
+        self.assertTrue(marker.exists())
+        launcher,marker=self.legacy_marker()
+        for current in ({'runtime_verified':False},
+                        {'runtime_verified':True,'version':'0.1.3','maintenance_mode':False},
+                        {'runtime_verified':True,'version':None,'maintenance_mode':True}):
+            with patch('gateway_update.support.report',return_value={'gateway':current}):
+                with self.assertRaisesRegex(UpgradeError,'PRIOR_UPGRADE'):recover_marker(self.app,launcher)
+            self.assertTrue(marker.exists())
+        launcher.write_bytes(b'powershell -EncodedCommand PRIVATE_CONFIG')
+        with self.assertRaisesRegex(UpgradeError,'PRIOR_UPGRADE'):recover_marker(self.app,launcher)
+        self.assertTrue(marker.exists())
+
+    def test_pending_job_blocks_legacy_marker_recovery_without_changing_jobs(self):
+        launcher,marker=self.legacy_marker()
+        with closing(sqlite3.connect(self.db)) as con:
+            con.execute("UPDATE jobs SET state='running'");con.commit()
+        with patch('gateway_update.support.report',return_value={'gateway':{'runtime_verified':True,'version':None,'maintenance_mode':False}}):
+            with self.assertRaisesRegex(UpgradeError,'TASKS_NOT_IDLE'):recover_marker(self.app,launcher)
+        self.assertTrue(marker.exists())
+        with closing(sqlite3.connect(self.db)) as con:self.assertEqual(con.execute('SELECT state FROM jobs').fetchone()[0],'running')
+
 
 class MaintenanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_maintenance_blocks_submissions_and_claims_but_allows_status(self):
@@ -128,7 +170,7 @@ class MaintenanceTests(unittest.IsolatedAsyncioTestCase):
                 owner={'Authorization':'Bearer SYNTHETIC_OWNER'};worker={'Authorization':'Bearer SYNTHETIC_WORKER'}
                 response=await client.get('/v1/status',headers=owner)
                 self.assertTrue(response.json()['maintenance_mode'])
-                self.assertEqual(response.json()['relay_version'],'0.1.3')
+                self.assertEqual(response.json()['relay_version'],'0.1.4')
                 response=await client.post('/v1/jobs',headers=owner,json={'job_id':'2'*32,'tool':'wind_status','arguments':{'connect':False}})
                 self.assertEqual(response.status_code,503)
                 self.assertIsNone((await client.post('/v1/worker/claim',headers=worker,json={})).json()['job'])

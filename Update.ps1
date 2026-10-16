@@ -7,7 +7,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $sourceRoot = $PSScriptRoot
-$expectedVersion = '0.3.1'
+$expectedVersion = '0.3.2'
 $taskName = 'WindRelayMonitor'
 $reviewedFiles = @('monitor/monitor.py','monitor/diagnostics.py','monitor/management.py','monitor/updates.py',
     'monitor/cacert.pem','monitor/CA-LICENSE.txt','monitor/ca-provenance.json',

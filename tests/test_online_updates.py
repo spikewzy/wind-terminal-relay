@@ -29,7 +29,7 @@ class UpdatesTests(unittest.TestCase):
         (self.app/'.relay').mkdir(parents=True)
         package = build(self.root/'dist')
         self.data = Path(package['archive']).read_bytes()
-        self.release = {'gateway_version':'0.1.3','console_version':VERSION,'path':'updates/packages/wind-relay-gateway-upgrade-0.1.3.zip',
+        self.release = {'gateway_version':'0.1.4','console_version':VERSION,'path':'updates/packages/wind-relay-gateway-upgrade-0.1.4.zip',
                         'sha256':package['sha256'],'bytes':len(self.data),'build_id':package['build_id'],
                         'published_on':'2026-10-16','notes':'离线合成测试','updater_protocol':1}
         self.feed = {'schema_version':1,'channel':'stable','releases':[self.release]}
@@ -77,51 +77,51 @@ class UpdatesTests(unittest.TestCase):
 
     def test_manual_confirm_download_integrity_and_persistent_completion(self):
         self.checked()
-        with self.assertRaisesRegex(UpdateError,'CONFIRMATION_REQUIRED'):self.manager.install('0.1.3',False)
-        self.manager.install('0.1.3',True);self.finish()
+        with self.assertRaisesRegex(UpdateError,'CONFIRMATION_REQUIRED'):self.manager.install('0.1.4',False)
+        self.manager.install('0.1.4',True);self.finish()
         self.assertEqual(len(self.launched),1)
         self.assertEqual(self.guards,2)
         self.assertEqual(self.hits,[FEED,BASE+self.release['path']])
         op=self.manager.status()['operation']
         self.assertEqual(op['state'],'installing')
-        with self.assertRaisesRegex(UpdateError,'ALREADY_RUNNING'):self.manager.install('0.1.3',True)
+        with self.assertRaisesRegex(UpdateError,'ALREADY_RUNNING'):self.manager.install('0.1.4',True)
         write(self.manager.root/op['operation_id']/'result.json',{'operation_id':op['operation_id'],'state':'succeeded'})
-        fresh=Updates(self.app,lambda:None,lambda:{'gateway_version':'0.1.3'},self.recorder,running=lambda:False)
+        fresh=Updates(self.app,lambda:None,lambda:{'gateway_version':'0.1.4'},self.recorder,running=lambda:False)
         self.assertEqual(fresh.status()['operation']['state'],'succeeded')
         self.assertFalse(self.launched[0][1].joinpath('package/gateway.json').exists())
 
     def test_busy_or_pending_config_fails_before_any_download(self):
         self.checked();self.guard_error=True
-        with self.assertRaisesRegex(UpdateError,'TASKS_NOT_IDLE'):self.manager.install('0.1.3',True)
+        with self.assertRaisesRegex(UpdateError,'TASKS_NOT_IDLE'):self.manager.install('0.1.4',True)
         self.assertEqual(self.hits,[FEED]);self.assertFalse(self.manager.root.exists())
 
     def test_hash_failure_never_launches_or_replaces_existing_application(self):
         self.checked();self.data += b'TAMPERED'
         original=self.app/'legacy.txt';original.write_text('keep')
-        self.manager.install('0.1.3',True);self.finish()
+        self.manager.install('0.1.4',True);self.finish()
         self.assertEqual(self.manager.status()['operation']['error_code'],'UPDATE_HASH_MISMATCH')
         self.assertFalse(self.launched);self.assertEqual(original.read_text(),'keep')
 
     def test_fresh_check_required_and_no_downgrades(self):
-        with self.assertRaisesRegex(UpdateError,'CHECK_REQUIRED'):self.manager.install('0.1.3',True)
+        with self.assertRaisesRegex(UpdateError,'CHECK_REQUIRED'):self.manager.install('0.1.4',True)
         self.checked()
         self.manager.current=lambda:{'gateway_version':'0.2.0'}
         self.assertFalse(self.manager.status()['releases'][0]['eligible'])
-        with self.assertRaisesRegex(UpdateError,'NOT_AVAILABLE'):self.manager.install('0.1.3',True)
+        with self.assertRaisesRegex(UpdateError,'NOT_AVAILABLE'):self.manager.install('0.1.4',True)
         self.manager.current=lambda:{'gateway_version':'0.1.1'}
         self.manager.checked_at-=7*3600
-        with self.assertRaisesRegex(UpdateError,'CHECK_REQUIRED'):self.manager.install('0.1.3',True)
+        with self.assertRaisesRegex(UpdateError,'CHECK_REQUIRED'):self.manager.install('0.1.4',True)
 
     def test_unavailable_mirror_keeps_old_service_and_no_automatic_retry(self):
         self.checked()
         self.manager.fetcher=lambda *args:(_ for _ in ()).throw(OSError('DO_NOT_EXPORT_SECRET'))
         self.manager.check();self.wait_checked()
         self.assertEqual(self.manager.status()['check_error'],'UPDATE_SOURCE_UNAVAILABLE')
-        with self.assertRaisesRegex(UpdateError,'CHECK_REQUIRED'):self.manager.install('0.1.3',True)
+        with self.assertRaisesRegex(UpdateError,'CHECK_REQUIRED'):self.manager.install('0.1.4',True)
         self.assertNotIn('DO_NOT_EXPORT',json.dumps(self.recorder.history()))
 
     def test_interrupted_upgrade_is_reported_and_never_replayed(self):
-        self.checked();self.manager.install('0.1.3',True);self.finish()
+        self.checked();self.manager.install('0.1.4',True);self.finish()
         path=self.manager.root/'current.json'
         value=json.loads(path.read_text());value['updated_at']=time.time()-120;write(path,value)
         fresh=Updates(self.app,lambda:None,lambda:{},self.recorder,running=lambda:False)
@@ -181,10 +181,10 @@ class UpdatesTests(unittest.TestCase):
         url='http://127.0.0.1:'+str(server.server_port)
         try:
             for headers in ({},{'X-Console-Token':'a'*43,'Origin':'https://evil.invalid'}):
-                request=urllib.request.Request(url+'/api/updates/install',data=b'{"gateway_version":"0.1.3","confirmed":true}',headers=dict(headers,**{'Content-Type':'application/json'}))
+                request=urllib.request.Request(url+'/api/updates/install',data=b'{"gateway_version":"0.1.4","confirmed":true}',headers=dict(headers,**{'Content-Type':'application/json'}))
                 with self.assertRaises(urllib.error.HTTPError) as raised:urllib.request.urlopen(request)
                 self.assertEqual(raised.exception.code,403)
-            request=urllib.request.Request(url+'/api/updates/install',data=b'{"gateway_version":"0.1.3","confirmed":false}',headers={'X-Console-Token':'a'*43,'Content-Type':'application/json'})
+            request=urllib.request.Request(url+'/api/updates/install',data=b'{"gateway_version":"0.1.4","confirmed":false}',headers={'X-Console-Token':'a'*43,'Content-Type':'application/json'})
             with self.assertRaises(urllib.error.HTTPError) as raised:urllib.request.urlopen(request)
             self.assertEqual(raised.exception.code,400)
             self.assertEqual(self.hits,[FEED]);self.assertFalse(self.launched)

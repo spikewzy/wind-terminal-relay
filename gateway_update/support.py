@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import importlib.metadata
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -13,6 +14,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -29,6 +31,7 @@ CONSOLE_FILES = {'monitor/monitor.py','monitor/diagnostics.py','monitor/manageme
 UPGRADE_FILES = {'Upgrade-Gateway.cmd','Upgrade-Gateway.ps1','gateway_update/support.py','gateway_update/README.md'}
 SHA = re.compile(r'[a-f0-9]{64}\Z')
 SEMVER = re.compile(r'\d{1,3}\.\d{1,3}\.\d{1,3}\Z')
+LEGACY_013_BUILD = 'f3067a01d873cbe09fb95589a9f22d764b18f85b960d06a3e00b918ca101bfe6'
 
 
 class UpgradeError(Exception):
@@ -47,7 +50,7 @@ def verify_package(root):
     root = safe_path(root)
     value = read(root/'upgrade-manifest.json')
     expected = {'gateway/'+n for n in GATEWAY_FILES}|CONSOLE_FILES|UPGRADE_FILES|{'gateway/gateway-manifest.json'}
-    if (value.get('kind')!='wind_relay_gateway_upgrade' or value.get('version')!='0.1.3'
+    if (value.get('kind')!='wind_relay_gateway_upgrade' or value.get('version')!='0.1.4'
             or set(value.get('files',{}))!=expected):
         raise UpgradeError('PACKAGE_INVALID')
     for name, hashed in value['files'].items():
@@ -220,10 +223,45 @@ def report(app):
             'note':'Cloud runtime evidence only; worker version and live Wind login were not verified'}
 
 
+def recover_marker(app, launcher):
+    """Archive only the known 0.1.3 failed upgrade on a recovered legacy host.
+
+    Caller holds the configuration administrator lock. This never restores a
+    database or cancels/replays a job. Unknown or active maintenance is retained.
+    """
+    app=safe_path(app);launcher=safe_path(launcher)
+    if launcher not in {app/'start_gateway.cmd',app/'start-gateway.cmd'}:
+        raise UpgradeError('PRIOR_UPGRADE_REQUIRES_INSPECTION')
+    content=launcher.read_bytes().lower()
+    if b'--maintenance-file' in content or b'.gateway-releases' in content or b'encodedcommand' in content:
+        raise UpgradeError('PRIOR_UPGRADE_REQUIRES_INSPECTION')
+    marker=safe_path(app/'.relay/gateway-maintenance.json')
+    data=marker.read_bytes()
+    if json.loads(data).get('build_id')!=LEGACY_013_BUILD:
+        raise UpgradeError('PRIOR_UPGRADE_REQUIRES_INSPECTION')
+    current=report(app)['gateway']
+    if not current['runtime_verified'] or current.get('version') is not None or current.get('maintenance_mode'):
+        raise UpgradeError('PRIOR_UPGRADE_REQUIRES_INSPECTION')
+    _,_,database=configuration(app)
+    with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True,timeout=2)) as con:
+        db_idle(con)
+        if con.execute('PRAGMA quick_check').fetchone()[0]!='ok':
+            raise UpgradeError('DATABASE_CHECK_FAILED')
+    directory=safe_path(app/'.relay/archive')
+    directory.mkdir(mode=0o700,exist_ok=True);protect(directory)
+    if os.name!='nt':directory.chmod(0o700)
+    target=directory/('gateway-maintenance-0.1.3-'+uuid.uuid4().hex+'.json')
+    if marker.read_bytes()!=data:
+        raise UpgradeError('MAINTENANCE_MARKER_MISMATCH')
+    os.rename(marker,target)
+    protect(target)
+    return {'archived':True,'archive_name':target.name,'database_restored':False}
+
+
 def finalize(app,build,output=None):
     value=report(app)
     gateway=value['gateway']
-    if (not gateway['runtime_verified'] or gateway.get('build_id')!=build or gateway.get('version')!='0.1.3'
+    if (not gateway['runtime_verified'] or gateway.get('build_id')!=build or gateway.get('version')!='0.1.4'
             or not gateway.get('maintenance_mode') or gateway.get('scheduler')!='client_round_robin'):
         raise UpgradeError('GATEWAY_VERIFICATION_FAILED')
     config,_,_=configuration(app)
@@ -234,7 +272,7 @@ def finalize(app,build,output=None):
     marker=safe_path(app/'.relay/gateway-maintenance.json')
     if read(marker).get('build_id')!=build:
         raise UpgradeError('MAINTENANCE_MARKER_MISMATCH')
-    value['upgrade']={'outcome':'verified_before_activation','target_version':'0.1.3','build_id':build}
+    value['upgrade']={'outcome':'verified_before_activation','target_version':'0.1.4','build_id':build}
     # Reports must be writable before admission is resumed. No rollback of the
     # DB is permitted once this marker is removed and new jobs can be accepted.
     write(app/'.relay/deployment-current.json',value)
@@ -254,12 +292,13 @@ def finalize(app,build,output=None):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('operation',choices=['verify','inspect','environment','backup','restore','report','finalize'])
+    p.add_argument('operation',choices=['verify','inspect','environment','backup','restore','report','finalize','recover-marker'])
     p.add_argument('--root',type=Path,default=ROOT)
     p.add_argument('--app',type=Path)
     p.add_argument('--directory',type=Path)
     p.add_argument('--build-id')
     p.add_argument('--output',type=Path)
+    p.add_argument('--launcher',type=Path)
     a=p.parse_args()
     try:
         if a.operation=='verify':result=verify_package(a.root)
@@ -267,6 +306,7 @@ def main():
         elif a.operation=='inspect':result=inspect(a.app,a.root)
         elif a.operation=='backup':result=backup(a.app,a.directory)
         elif a.operation=='restore':result=restore(a.app,a.directory)
+        elif a.operation=='recover-marker':result=recover_marker(a.app,a.launcher)
         elif a.operation=='finalize':result=finalize(a.app,a.build_id,a.output)
         else:
             result=report(a.app)
