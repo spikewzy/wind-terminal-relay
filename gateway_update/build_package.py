@@ -39,6 +39,17 @@ def build(destination=None):
     console_hashes = {}
     for name in console_files:
         payload[name] = read_file(ROOT/name)
+        if name == 'START-HERE.txt':
+            payload[name] = ('Wind 云端网关升级 0.1.1 + 管理台 0.2.1\n\n'
+                '本包请双击 Upgrade-Gateway.cmd。它会升级网关并一起更新管理台。\n'
+                '先让同事暂停提交任务，确认队列没有排队、执行或不确定任务。\n'
+                'Wind、信创取数服务和 Tailscale 保持运行。\n\n'
+                '1. 完整解压到桌面新文件夹，不要覆盖 app 或 Python。\n'
+                '2. 双击 Upgrade-Gateway.cmd，权限提示选是，等待 DONE。\n'
+                '3. 在 WindRelay-Console 的版本与部署中核对网关 0.1.1，再恢复使用。\n\n'
+                '保留原 JSON 接入文件、Windows 任务密码和执行端；升级前备份，失败尝试回退。\n'
+                '部署报告自动保存到下载目录，也可在管理台再次导出。\n'
+                'Update.cmd 仍是只更新管理台的入口。详细步骤见 gateway_update/README.md。\n').encode('utf-8')
         console_hashes[name] = hashlib.sha256(payload[name]).hexdigest()
     from monitor.diagnostics import VERSION as CONSOLE_VERSION
     payload['console-manifest.json'] = (json.dumps({'kind':'wind_relay_console','version':CONSOLE_VERSION,'files':console_hashes},indent=2)+'\n').encode()

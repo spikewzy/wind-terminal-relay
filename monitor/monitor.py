@@ -337,6 +337,7 @@ def make_server(monitor, port):
                     snapshot = dict(monitor.value)
                 self.respond({"schema_version":1,"exported_at_utc":dt.datetime.now(dt.timezone.utc).isoformat(),
                     "console_version":VERSION,"collected_at":snapshot.get("collected_at"),
+                    "synthetic_fixture":snapshot.get("demonstration") is True,
                     "deployment":safe_deployment(snapshot.get("deployment")),
                     "worker":{key:snapshot.get("worker",{}).get(key) for key in ("online","mode","age_seconds")},
                     "live_wind_query_performed":False}, filename="wind-relay-deployment.json")

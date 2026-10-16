@@ -191,6 +191,14 @@ class MonitorHttpTests(unittest.TestCase):
                 urllib.request.urlopen(urllib.request.Request(self.url+"/api/status", headers=headers))
             self.assertEqual(error.exception.code, 403)
 
+    def test_deployment_report_marks_demonstrations_without_exporting_secrets(self):
+        self.monitor.value.update(demonstration=True, deployment={"gateway_version":"0.1.1", "token":"DO_NOT_EXPORT"})
+        with urllib.request.urlopen(self.url+"/api/deployment-report") as response:
+            result=json.load(response)
+            self.assertTrue(result["synthetic_fixture"])
+            self.assertEqual(result["deployment"]["gateway_version"],"0.1.1")
+            self.assertNotIn("DO_NOT_EXPORT",json.dumps(result))
+
     def test_no_mutation_or_file_routes_and_no_second_listener(self):
         for path in ("/.relay/client-owner.json", "/../monitor.py", "/v1/jobs"):
             with self.assertRaises(urllib.error.HTTPError) as error:
