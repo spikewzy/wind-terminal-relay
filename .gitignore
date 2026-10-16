@@ -26,3 +26,6 @@ monitor/diagnostics/
 
 monitor/auth/
 .console-updates/
+
+.gateway-releases/
+.gateway-backups/

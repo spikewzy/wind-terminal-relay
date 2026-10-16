@@ -1,9 +1,9 @@
-Wind 中继管理台 0.2.0 — 云电脑更新包
+Wind 中继管理台 0.2.1 — 云电脑更新包
 
 在已经部署网关的那台 Windows 云电脑上操作：
 1. 把整个 ZIP 解压到一个新文件夹（例如桌面），不要解压覆盖 Python 或 app。
 2. 双击 Update.cmd，Windows 询问权限时选“是”。
-3. 看到 Console 0.2.0 updated 后，打开桌面的 WindRelay-Console。
+3. 看到 Console 0.2.1 updated 后，打开桌面的 WindRelay-Console。
 
 默认现有目录 C:\WindRelay\app。复用现有 Python，不需要重新安装 Wind 或 MCP。
 这次仅更新管理台，不升级网关或取数端、不清空数据库、不重置接入文件。

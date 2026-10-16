@@ -16,7 +16,7 @@ import time
 import traceback
 import zipfile
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 SEMVER = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
 FRAME_FILES = {"monitor.py", "diagnostics.py", "management.py", "request.py", "error.py", "threading.py",
@@ -34,6 +34,24 @@ GROUPS = {
     "gateway": {"ok", "reason", "worker_online", "execution_paused", "worker_mode", "relay_version", "mcp_version"},
     "public_access": {"ok", "reason", "worker_online", "execution_paused", "worker_mode", "relay_version", "mcp_version"},
 }
+
+
+def safe_deployment(value):
+    if not isinstance(value,dict) or not value:return {}
+    clean=fields(value, {'gateway_runtime_verified','worker_version_verified','maintenance_mode',
+                        'single_execution_lane'})
+    build=value.get('gateway_build_id')
+    clean['gateway_build_id']=build if isinstance(build,str) and re.fullmatch(r'[a-f0-9]{64}',build) else None
+    clean['scheduler']='client_round_robin' if value.get('scheduler')=='client_round_robin' else None
+    for key in ('gateway_version','core_contract_version','worker_version'):
+        version=value.get(key)
+        clean[key]=version if isinstance(version,str) and SEMVER.fullmatch(version) else None
+    policy=value.get('queue_policy',{})
+    if isinstance(policy,dict):
+        clean['queue_policy']={k:v for k,v in policy.items()
+            if k in {'client_pending_limit','global_queued_limit','new_jobs_per_minute','global_new_jobs_per_minute'}
+            and (v is None or type(v) is int and 0<=v<=10**9)}
+    return clean
 
 
 def scalar(value):
@@ -56,6 +74,7 @@ def safe_snapshot(value):
     for name, keys in GROUPS.items():
         if name in value:
             clean[name] = fields(value[name], keys)
+    clean["deployment"] = safe_deployment(value.get("deployment"))
     clean["latest_native_data"] = (fields(value.get("latest_native_data"), JOB_KEYS)
                                     if isinstance(value.get("latest_native_data"), dict) else None)
     for name in ("active_jobs", "recent_jobs"):

@@ -33,6 +33,8 @@ class ReleasePackageTests(unittest.TestCase):
             "relay_private_credentials.py", "dist/old-package.zip",
             "monitor/auth/console.key", "monitor/logs/monitor.log",
             ".console-updates/backup/task.xml", ".relay/console-backups/gateway.json",
+            ".gateway-backups/old/queue.sqlite", ".gateway-releases/old/.venv/private.py",
+            ".relay/deployment-current.json",
         ]
         marker = hashlib.sha256(str(self.root).encode()).hexdigest()
         for name in private:

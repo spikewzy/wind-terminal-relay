@@ -18,9 +18,13 @@ flowchart LR
 | 网关与持久队列 | `relay_gateway.py` | 云服务器 | 不需要 |
 | 执行端 | `relay_worker.py` | 已能运行 WindPy 的实体电脑 | 需要；由 `mcp_root` 指向现有核心 |
 
+## 已部署旧网关：直接升级
+
+下载发行页的 **wind-relay-gateway-upgrade-0.1.1.zip**，解压到新文件夹，双击 **Upgrade-Gateway.cmd**。它检查空闲队列、备份数据库、切换新版网关，核对按设备轮转和限流后恢复接单，并同时更新管理台及导出部署报告。保留原接入 JSON、Windows 任务凭据和取数端；失败回退不丢原任务。具体步骤见 [现有部署升级](gateway_update/README.md)。
+
 ## 云电脑统一管理台
 
-已有网关可单独更新 [Wind 中继管理台](monitor/README.md)：监控运行状态、添加/撤销设备、下载接入文件、导出诊断包。下载 `wind-relay-console-0.2.0.zip`，在云电脑解压到新文件夹，双击 `Update.cmd`。复用现有 Python，仅更新管理台；本地 MCP、网关和信创执行端独立维护。旧后台未计量时仍显示未知，不推算官方额度。
+已有网关可单独更新 [Wind 中继管理台](monitor/README.md)：监控运行状态、添加/撤销设备、下载接入文件、导出诊断包。下载 `wind-relay-console-0.2.1.zip`，在云电脑解压到新文件夹，双击 `Update.cmd`。复用现有 Python，仅更新管理台；本地 MCP、网关和信创执行端独立维护。旧后台未计量时仍显示未知，不推算官方额度。
 
 ## 并发处理
 

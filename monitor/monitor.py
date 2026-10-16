@@ -21,10 +21,10 @@ import urllib.parse
 import urllib.request
 
 try:
-    from .diagnostics import VERSION, Recorder, bundle_name
+    from .diagnostics import VERSION, Recorder, bundle_name, safe_deployment, SEMVER
     from .management import Management, ManagementError, access_key
 except ImportError:  # Running this portable file directly, outside a package.
-    from diagnostics import VERSION, Recorder, bundle_name
+    from diagnostics import VERSION, Recorder, bundle_name, safe_deployment, SEMVER
     from management import Management, ManagementError, access_key
 
 HERE = Path(__file__).resolve().parent
@@ -183,8 +183,18 @@ def probe(url, token, recorder=None, stage="gateway_probe"):
         return {"ok": True, "worker_online": value["worker_online"],
                 "execution_paused": value.get("execution_paused"),
                 "worker_mode": safe_label(value.get("worker_mode")),
-                "relay_version": safe_label(value.get("relay_version")),
-                "mcp_version": safe_label(str(value.get("mcp_version", "")).replace(".", "_"))}
+                "relay_version": value.get("relay_version") if isinstance(value.get("relay_version"),str) and SEMVER.fullmatch(value["relay_version"]) else None,
+                "mcp_version": value.get("mcp_version") if isinstance(value.get("mcp_version"),str) and SEMVER.fullmatch(value["mcp_version"]) else None,
+                "deployment": safe_deployment({
+                    "gateway_runtime_verified":True,
+                    "gateway_version":value.get("relay_version"),
+                    "gateway_build_id":(value.get("deployment") or {}).get("build_id"),
+                    "core_contract_version":value.get("mcp_version"),
+                    "scheduler":(value.get("deployment") or {}).get("scheduler"),
+                    "single_execution_lane":(value.get("deployment") or {}).get("single_execution_lane"),
+                    "maintenance_mode":value.get("maintenance_mode") is True,
+                    "queue_policy":value.get("queue_policy"),
+                    "worker_version":None,"worker_version_verified":False})}
     except urllib.error.HTTPError as exc:
         if recorder is not None:
             recorder.record("probe_failed", stage, "HTTP_"+str(exc.code), exc=exc)
@@ -226,6 +236,9 @@ def collect(config_path, client_path, gateway_port, recorder=None):
         value["public_access"] = {"ok": None, "reason": "CLIENT_CONFIG_UNAVAILABLE"}
         if recorder is not None:
             recorder.record("configuration_failed", "client_config", "CLIENT_CONFIG_UNAVAILABLE", exc=exc)
+    value["deployment"] = value.get("gateway",{}).get("deployment", {
+        "gateway_runtime_verified":False,"gateway_version":None,
+        "worker_version":None,"worker_version_verified":False})
     value["probe_finished_at"] = time.time()
     return value
 
@@ -319,6 +332,14 @@ def make_server(monitor, port):
                 with monitor.lock:
                     data = dict(monitor.value)
                 self.respond(data)
+            elif self.path == "/api/deployment-report":
+                with monitor.lock:
+                    snapshot = dict(monitor.value)
+                self.respond({"schema_version":1,"exported_at_utc":dt.datetime.now(dt.timezone.utc).isoformat(),
+                    "console_version":VERSION,"collected_at":snapshot.get("collected_at"),
+                    "deployment":safe_deployment(snapshot.get("deployment")),
+                    "worker":{key:snapshot.get("worker",{}).get(key) for key in ("online","mode","age_seconds")},
+                    "live_wind_query_performed":False}, filename="wind-relay-deployment.json")
             elif self.path == "/api/diagnostics":
                 monitor.recorder.record("diagnostics_exported", "export", "DIAGNOSTICS_EXPORTED")
                 self.respond(monitor.export(), "application/zip", filename=bundle_name())

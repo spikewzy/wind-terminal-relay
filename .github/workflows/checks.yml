@@ -33,7 +33,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @('Update.ps1','monitor/Install.ps1','.github/windows-console-smoke.ps1')) {
+          foreach ($file in @('Update.ps1','monitor/Install.ps1','.github/windows-console-smoke.ps1','Upgrade-Gateway.ps1','.github/windows-gateway-upgrade-smoke.ps1')) {
             $consoleTokens = $null
             $consoleParseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$consoleTokens, [ref]$consoleParseErrors) | Out-Null
@@ -43,10 +43,16 @@ jobs:
         run: python build_release.py
       - name: Build unified console and updater
         run: python monitor/build_package.py
+      - name: Build gateway upgrade bundle
+        run: python gateway_update/build_package.py
       - name: Install and upgrade console against a synthetic Windows deployment
         if: runner.os == 'Windows'
         shell: pwsh
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .github/windows-console-smoke.ps1
+      - name: Upgrade a synthetic legacy gateway, verify rotation, report and rollback
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .github/windows-gateway-upgrade-smoke.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: wind-terminal-relay-${{ matrix.os }}-py${{ matrix.python }}

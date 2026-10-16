@@ -15,6 +15,7 @@ from . import PROTOCOL_VERSION, VERSION
 from .common import IDENTIFIER, MAX_REQUEST_BYTES, MAX_RESULT_BYTES, RelayError, digest, load_contract
 from .store import DEFAULT_QUEUE_POLICY, Queue
 from .usage import UsageLedger
+from .deployment import runtime_identity
 
 
 def create_app(config, queue=None):
@@ -30,6 +31,12 @@ def create_app(config, queue=None):
         hashes.append(config["admin_sha256"])
     if len(set(hashes)) != len(hashes):
         raise ValueError("Client, worker and administrator credentials must be distinct")
+    deployment = runtime_identity()
+    maintenance_file = config.get("maintenance_file")
+    def maintenance():
+        from pathlib import Path
+        return bool(maintenance_file and Path(maintenance_file).exists())
+
     contract = load_contract()
     tools = {tool["name"]: tool for tool in contract["tools"]}
     supplied_policy = config.get("queue_policy", {})
@@ -73,7 +80,8 @@ def create_app(config, queue=None):
         result = await asyncio.to_thread(queue.status, owner)
         return JSONResponse({"protocol_version": PROTOCOL_VERSION, "relay_version": VERSION,
                              "mcp_version": contract["mcp_version"], "queue_policy": queue.policy,
-                             "server_sha256": contract["server_sha256"], **result})
+                             "server_sha256": contract["server_sha256"],
+                             "deployment": deployment, "maintenance_mode": maintenance(), **result})
 
     async def usage(request):
         role = "admin" if request.url.path == "/v1/admin/usage" else "client"
@@ -92,6 +100,8 @@ def create_app(config, queue=None):
 
     async def submit(request):
         owner = authenticate(request, "client")
+        if maintenance():
+            raise RelayError("GATEWAY_MAINTENANCE", "Gateway upgrade is not activated; no job was accepted", 503)
         value = await body(request, MAX_REQUEST_BYTES)
         if (set(value) != {"job_id", "tool", "arguments"}
                 or not isinstance(value.get("tool"), str) or value["tool"] not in tools):
@@ -114,6 +124,8 @@ def create_app(config, queue=None):
 
     async def claim(request):
         authenticate(request, "worker")
+        if maintenance():
+            return JSONResponse({"job": None, "maintenance_mode": True})
         value = await body(request, 4096)
         if (not isinstance(value.get("mode"), str) or value["mode"] not in {"mock", "native"}
                 or value.get("server_sha256") != contract["server_sha256"]):
