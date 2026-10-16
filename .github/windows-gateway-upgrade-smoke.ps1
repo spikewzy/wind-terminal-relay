@@ -72,7 +72,8 @@ try {
   Add-LocalGroupMember -Group $administrators -Member $syntheticAccount
   Register-ScheduledTask -TaskName 'WindRelayGateway' -Action $oldAction -Trigger $trigger -User ($env:COMPUTERNAME+'\'+$syntheticAccount) -Password $syntheticPassword -RunLevel Highest -Settings $settings | Out-Null
   $syntheticPassword=$null;$securePassword=$null
-  if ([string](Get-ScheduledTask -TaskName 'WindRelayGateway').Principal.LogonType -ne 'Password') { throw 'Password-logon fixture was not actually registered.' }
+  $passwordTaskBefore=Get-ScheduledTask -TaskName 'WindRelayGateway'
+  if ([string]$passwordTaskBefore.Principal.LogonType -ne 'Password') { throw 'Password-logon fixture was not actually registered.' }
  } else {
   Register-ScheduledTask -TaskName 'WindRelayGateway' -Action $oldAction -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
  }
@@ -95,7 +96,9 @@ try {
  $after=Wait-Gateway
  if ($PasswordLauncher) {
   $taskAfter=Get-ScheduledTask -TaskName 'WindRelayGateway'
-  if ($taskAfter.Actions[0].Execute -ne $launcherPath -or $taskAfter.Actions[0].Arguments -or [string]$taskAfter.Principal.LogonType -ne 'Password' -or $taskAfter.Principal.UserId -notlike ('*\'+$syntheticAccount)) { throw 'Password task identity/action changed.' }
+  # Task Scheduler may canonicalize the registered account name to a SID.
+  # Compare the actual registered identity/action before and after the upgrade.
+  if ([string]$taskAfter.Actions[0].Execute -cne [string]$passwordTaskBefore.Actions[0].Execute -or [string]$taskAfter.Actions[0].Arguments -cne [string]$passwordTaskBefore.Actions[0].Arguments -or [string]$taskAfter.Actions[0].WorkingDirectory -cne [string]$passwordTaskBefore.Actions[0].WorkingDirectory -or [string]$taskAfter.Principal.LogonType -cne [string]$passwordTaskBefore.Principal.LogonType -or [string]$taskAfter.Principal.UserId -cne [string]$passwordTaskBefore.Principal.UserId -or [string]$taskAfter.Principal.RunLevel -cne [string]$passwordTaskBefore.Principal.RunLevel) { throw 'Password task identity/action changed.' }
   if (@(Get-ChildItem -LiteralPath (Join-Path $app '.relay/archive') -Filter 'gateway-maintenance-0.1.3-*.json').Count -ne 1) { throw 'Known legacy marker was not preserved.' }
  }
  if ($after.relay_version -ne '0.1.4' -or $after.deployment.scheduler -ne 'client_round_robin' -or $after.maintenance_mode -or $after.queue_policy.client_pending_limit -ne 5) { throw 'Runtime upgrade not verified.' }
