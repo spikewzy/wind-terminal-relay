@@ -133,7 +133,11 @@ function Replace-Launcher([byte[]]$Bytes) {
     Assert-Safe $temporary
     try {
         [IO.File]::WriteAllBytes($temporary,$Bytes)
-        [IO.File]::Replace($temporary,$launcherPath,$null)
+        # Windows PowerShell 5.1 binds $null to an empty String for this .NET
+        # overload. Use a real private backup path, preserving the replaced bytes.
+        $replaced = Join-Path $backup ('launcher-replaced-'+[guid]::NewGuid().ToString('N')+'.cmd')
+        Assert-Safe $replaced
+        [IO.File]::Replace($temporary,$launcherPath,$replaced)
     } finally {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
     }
